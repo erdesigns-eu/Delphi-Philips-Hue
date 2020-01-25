@@ -7,5 +7,8 @@ You can switch lights, scenes, add and modify scenes and schedules, and much mor
 
 Take a look at the demo for the functions (found on the website), the download contains the THueBridge component and a custom JSON parser class - that is used in multiple projects.
 
+Images and (compiled) demo are available on the website:
+https://erdesigns.eu/app/delphi/view/2
+
 If you use it in your project, please just like our facebook page and credits would be nice :)
 Please visit our website: https://erdesigns.eu and facebook page: https://fb.me/erdesigns.eu
