@@ -1,0 +1,5 @@
+THueBridge BITMAP "huebridge.bmp"
+THueBridge16_PNG RCDATA "thuebridge16.png"
+THueBridge24_PNG RCDATA "thuebridge24.png"
+THueBridge32_PNG RCDATA "thuebridge32.png"
+THueBridge128_PNG RCDATA "thuebridge128.png"
