@@ -4,7 +4,7 @@ program ConsoleHueDemo;
 
 uses
   System.SysUtils,
-  untHueBridge in '..\untHueBridge.pas',
+  Hue.Bridge in '..\Hue.Bridge.pas',
   Hue.Types in '..\Hue.Types.pas';
 
 var

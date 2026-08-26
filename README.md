@@ -1,6 +1,6 @@
 # Delphi Philips Hue
 
-`THueBridge` is a non-visual VCL component for the Philips Hue local REST API. This release keeps the established `uses untHueBridge;` object model while moving protocol, JSON, errors, and HTTP into focused runtime units. API v1 remains the default; API v2 is an explicit opt-in.
+`THueBridge` is a non-visual VCL component for the Philips Hue local REST API. This breaking release moves the public component unit to `Hue.Bridge`, retains the established `THueBridge` object model, and separates protocol, JSON, errors, and HTTP into focused runtime units. API v1 remains the default; API v2 is an explicit opt-in.
 
 ## Requirements
 
@@ -12,12 +12,12 @@ Runtime code no longer uses Indy or external OpenSSL DLLs. `THTTPClient` perform
 
 ## Install
 
-Add the repository root to the Delphi library path, add `untHueBridge.pas` to a runtime package, and compile `HueBridge.rc` into the design-time package if the palette bitmap is wanted. Call `Register` or install the package to place `THueBridge` on the **ERDesigns** palette. The component remains VCL-only and non-visual; none of the runtime API clients require a form.
+Add the repository root to the Delphi library path, add `Hue.Bridge.pas` to a runtime package, and compile `HueBridge.rc` into the design-time package if the palette bitmap is wanted. Call `Register` or install the package to place `THueBridge` on the **ERDesigns** palette. The component remains VCL-only and non-visual; none of the runtime API clients require a form.
 
 ## Quick start
 
 ```pascal
-uses untHueBridge, Hue.Types;
+uses Hue.Bridge, Hue.Types;
 
 var Hue: THueBridge;
 begin
@@ -87,7 +87,7 @@ Hue v2 models devices, services, rooms, zones, `grouped_light`, scenes, and sens
 
 | Unit | Responsibility |
 |---|---|
-| `untHueBridge.pas` | Backward-compatible component and established model classes |
+| `Hue.Bridge.pas` | Backward-compatible component and established model classes |
 | `Hue.Types.pas` | API version, HTTP method, resource reference |
 | `Hue.Errors.pas` | HTTP, API, and unsupported-capability exceptions |
 | `Hue.JSON.pas` | Safe `System.JSON` parsing/access and Unicode quoting |
@@ -100,13 +100,14 @@ Hue v2 models devices, services, rooms, zones, `grouped_light`, scenes, and sens
 
 ## Migration from the original component
 
-1. Keep `uses untHueBridge` and existing component creation/design-time forms.
-2. Existing applications remain on `hav1` by default.
-3. Remove deployment of Indy OpenSSL DLLs; HTTPS now uses the platform stack.
-4. Expect `EHueHTTPError`, `EHueAPIError`, or `EHueUnsupportedOperation` rather than an empty response that hides the failure.
-5. Opt into v2 with `APIVersion := hav2` and persist/use `ResourceID` strings. Do not store v2 IDs in integers.
-6. Use UUID overloads for v2 light/group control and scene recall. Schedules and integer-ID mutation methods remain v1-only.
-7. `HTTP: TIdHTTP` is no longer public because exposing a concrete transport prevented secure replacement. Use `SetTransport` for a test double; protocol internals remain hidden in normal use.
+1. Replace `uses untHueBridge` with `uses Hue.Bridge`. This unit rename is an intentional breaking change.
+2. Existing DFM files do not contain the unit name. Their declaration remains `object HueBridge1: THueBridge`, so no DFM class-name edit is required. If a form was edited manually, ensure its component line still names `THueBridge`.
+3. Existing applications remain on `hav1` by default.
+4. Remove deployment of Indy OpenSSL DLLs; HTTPS now uses the platform stack.
+5. Expect `EHueHTTPError`, `EHueAPIError`, or `EHueUnsupportedOperation` rather than an empty response that hides the failure.
+6. Opt into v2 with `APIVersion := hav2` and persist/use `ResourceID` strings. Do not store v2 IDs in integers.
+7. Use UUID overloads for v2 light/group control and scene recall. Schedules and integer-ID mutation methods remain v1-only.
+8. `HTTP: TIdHTTP` is no longer public because exposing a concrete transport prevented secure replacement. Use `SetTransport` for a test double; protocol internals remain hidden in normal use.
 
 No other legacy classes, collection names, loading events, or update flags were removed. Direct Indy customization is the intentional breaking change.
 

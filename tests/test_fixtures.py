@@ -26,7 +26,7 @@ def test_v2_room_grouped_light_reference():
 
 def test_no_real_credentials_or_obsolete_transport():
     root = Path(__file__).parents[1]
-    source = (root / "untHueBridge.pas").read_text(encoding="utf-8-sig")
+    source = (root / "Hue.Bridge.pas").read_text(encoding="utf-8-sig")
     assert "TIdSSLIOHandlerSocketOpenSSL" not in source
     assert "hue-application-key" in (root / "Hue.API.V2.pas").read_text()
     assert "hav1" in source and "hav2" in source
@@ -35,7 +35,7 @@ def test_no_real_credentials_or_obsolete_transport():
 def test_payload_and_endpoint_contracts():
     v1 = (Path(__file__).parents[1] / "Hue.API.V1.pas").read_text()
     v2 = (Path(__file__).parents[1] / "Hue.API.V2.pas").read_text()
-    bridge = (Path(__file__).parents[1] / "untHueBridge.pas").read_text(encoding="utf-8-sig")
+    bridge = (Path(__file__).parents[1] / "Hue.Bridge.pas").read_text(encoding="utf-8-sig")
     assert "/api/%s%s" in v1
     assert "/clip/v2/resource%s" in v2
     assert '"recall":{"action":"active"}' in bridge
