@@ -17,6 +17,8 @@ type
     LastBody: string;
     /// <summary>Stores the last HTTP method passed by an adapter.</summary>
     LastMethod: THueHTTPMethod;
+    /// <summary>Enables synthetic v2 device, light, room, zone, and grouped-light responses.</summary>
+    UseResourceFixtures: Boolean;
     /// <summary>Captures a request and returns an empty successful Hue envelope.</summary>
     function Execute(const AMethod: THueHTTPMethod; const AURL, ABody: string;
       const AHeaders: THueHeaders): string;
@@ -46,6 +48,10 @@ type
     [Test] procedure ResourceIdentifiers;
     /// <summary>Verifies version-neutral controls generate native v2 requests.</summary>
     [Test] procedure VersionNeutralV2Control;
+    /// <summary>Verifies native v2 xy payload generation and chromaticity validation.</summary>
+    [Test] procedure NativeXYControl;
+    /// <summary>Verifies device product data and grouped-light state are mapped into compatibility models.</summary>
+    [Test] procedure V2DeviceAndGroupedLightParsing;
   end;
 
 implementation
@@ -61,7 +67,16 @@ begin
   LastBody := ABody;
   LastMethod := AMethod;
   HasApplicationKey := AHeaders.ContainsKey('hue-application-key');
-  Result := '{"errors":[],"data":[]}';
+  if UseResourceFixtures and AURL.EndsWith('/device') then
+    Result := '{"errors":[],"data":[{"id":"device-id","metadata":{"name":"Desk device"},"product_data":{"manufacturer_name":"Signify Netherlands B.V.","model_id":"LCT001","product_id":"9290012573A","product_name":"Hue lamp"}}]}'
+  else if UseResourceFixtures and AURL.EndsWith('/light') then
+    Result := '{"errors":[],"data":[{"id":"light-id","owner":{"rid":"device-id","rtype":"device"},"metadata":{"name":"Desk"},"on":{"on":true},"dimming":{"brightness":50},"color_temperature":{"mirek":250}}]}'
+  else if UseResourceFixtures and AURL.EndsWith('/grouped_light') then
+    Result := '{"errors":[],"data":[{"id":"grouped-id","on":{"on":true},"dimming":{"brightness":42.5}}]}'
+  else if UseResourceFixtures and (AURL.EndsWith('/room') or AURL.EndsWith('/zone')) then
+    Result := '{"errors":[],"data":[{"id":"space-id","metadata":{"name":"Office"},"services":[{"rid":"grouped-id","rtype":"grouped_light"}]}]}'
+  else
+    Result := '{"errors":[],"data":[]}';
 end;
 
 procedure THueMockTransport.SetUserAgent(const AValue: string);
@@ -152,8 +167,10 @@ begin
     Bridge.Username := 'key';
     Bridge.APIVersion := hav2;
     Light := Bridge.Lights.Add;
-    Light.LoadLightV2('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'Desk',
-      'LCT001', 'Hue lamp', True, 127, 250);
+    Light.LoadLightV2('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      'dddddddd-1111-2222-3333-444444444444', 'Desk',
+      'Signify Netherlands B.V.', 'LCT001', '9290012573A', 'Hue lamp',
+      True, 127, 250);
 
     Assert.IsTrue(Bridge.SetLightOn(Light, False));
     Assert.AreEqual(hhmPut, Mock.LastMethod);
@@ -164,6 +181,63 @@ begin
     Assert.IsTrue(Bridge.SetLightBrightness(Light, 127));
     Assert.Contains(Mock.LastBody, '"dimming"');
     Assert.Contains(Mock.LastBody, '"brightness"');
+  finally
+    Bridge.Free;
+  end;
+end;
+
+procedure THueCoreTests.NativeXYControl;
+var
+  Bridge: THueBridge;
+  Light: THueLight;
+  Mock: THueMockTransport;
+begin
+  Bridge := THueBridge.Create(nil);
+  try
+    Mock := THueMockTransport.Create;
+    Bridge.SetTransport(Mock);
+    Bridge.IP := 'bridge.local';
+    Bridge.Username := 'key';
+    Bridge.APIVersion := hav2;
+    Light := Bridge.Lights.Add;
+    Light.LoadLightV2('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      'dddddddd-1111-2222-3333-444444444444', 'Desk',
+      'Signify Netherlands B.V.', 'LCT001', '9290012573A', 'Hue lamp',
+      True, 127, 250);
+    Assert.IsTrue(Bridge.SetLightXY(Light, 0.3, 0.3));
+    Assert.Contains(Mock.LastBody, '"color"');
+    Assert.Contains(Mock.LastBody, '"xy"');
+    Assert.WillRaise(
+      procedure begin Bridge.SetLightXY(Light, 0.8, 0.4); end,
+      EArgumentOutOfRangeException);
+  finally
+    Bridge.Free;
+  end;
+end;
+
+procedure THueCoreTests.V2DeviceAndGroupedLightParsing;
+var
+  Bridge: THueBridge;
+  Mock: THueMockTransport;
+begin
+  Bridge := THueBridge.Create(nil);
+  try
+    Mock := THueMockTransport.Create;
+    Mock.UseResourceFixtures := True;
+    Bridge.SetTransport(Mock);
+    Bridge.IP := 'bridge.local';
+    Bridge.Username := 'key';
+    Bridge.APIVersion := hav2;
+    Bridge.LoadLights;
+    Assert.AreEqual(1, Bridge.Lights.Count);
+    Assert.AreEqual('device-id', Bridge.Lights[0].DeviceResourceID);
+    Assert.AreEqual('Signify Netherlands B.V.', Bridge.Lights[0].ManufacturerName);
+    Assert.AreEqual('9290012573A', Bridge.Lights[0].ProductID);
+    Bridge.LoadGroups;
+    Assert.AreEqual(2, Bridge.Groups.Count);
+    Assert.AreEqual('grouped-id', Bridge.Groups[0].GroupedLightResourceID);
+    Assert.AreEqual(gsAnyOn, Bridge.Groups[0].State);
+    Assert.AreEqual(108, Bridge.Groups[0].Action.Brightness);
   finally
     Bridge.Free;
   end;

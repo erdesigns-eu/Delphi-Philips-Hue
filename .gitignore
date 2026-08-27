@@ -15,3 +15,6 @@ tests/dcu/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Local Delphi build output
+build/

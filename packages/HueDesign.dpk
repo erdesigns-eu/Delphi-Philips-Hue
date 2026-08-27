@@ -1,0 +1,19 @@
+package HueDesign;
+
+{$R *.res}
+{$ALIGN 8}
+{$ASSERTIONS ON}
+{$DESCRIPTION 'Delphi Philips Hue design-time package'}
+{$DESIGNONLY}
+{$IMPLICITBUILD OFF}
+
+requires
+  rtl,
+  vcl,
+  designide,
+  HueRuntime;
+
+contains
+  Hue.Design in '..\Hue.Design.pas';
+
+end.

@@ -25,6 +25,16 @@ def test_v2_room_grouped_light_reference():
     assert room["services"][0]["rid"] == "99999999-8888-7777-6666-555555555555"
 
 
+def test_v2_grouped_light_state_and_device_product_data():
+    grouped = json.loads((FIXTURES / "v2-grouped-lights.json").read_text())["data"][0]
+    device = json.loads((FIXTURES / "v2-devices.json").read_text())["data"][0]
+    light = json.loads((FIXTURES / "v2-lights.json").read_text())["data"][0]
+    assert grouped["on"]["on"] is True
+    assert grouped["dimming"]["brightness"] == 42.5
+    assert light["owner"]["rid"] == device["id"]
+    assert device["product_data"]["manufacturer_name"] == "Signify Netherlands B.V."
+
+
 def test_no_real_credentials_or_obsolete_transport():
     root = Path(__file__).parents[1]
     source = (root / "Hue.Bridge.pas").read_text(encoding="utf-8-sig")
@@ -63,6 +73,8 @@ def test_version_neutral_helpers_and_example():
         ("SetLightOn", "SetLightOn"),
         ("SetLightBrightness", "SetLightBrightness"),
         ("SetLightColorTemperature", "SetLightColorTemperature"),
+        ("SetLightXY", None),
+        ("SetGroupXY", None),
         ("SetGroupOn", "SetGroupOn"),
         ("RecallScene(const AScene: THueScene)", "RecallScene"),
         ("GetLightByResourceID", "GetLightByResourceID"),
@@ -70,3 +82,17 @@ def test_version_neutral_helpers_and_example():
     ):
         assert declaration in bridge
         assert usage is None or usage in example
+
+
+def test_event_stream_packages_and_vcl_demos_exist():
+    root = Path(__file__).parents[1]
+    stream = (root / "Hue.EventStream.pas").read_text()
+    assert "/eventstream/clip/v2" in stream
+    assert "text/event-stream" in stream
+    assert (root / "packages" / "HueRuntime.dpk").exists()
+    assert (root / "packages" / "HueDesign.dpk").exists()
+    assert (root / "tests" / "HueTests.dpr").exists()
+    for demo in ("SimpleVCL", "HomeAutomation", "SceneBrowser", "EventMonitor"):
+        files = list((root / "examples" / demo).iterdir())
+        assert any(path.suffix == ".dpr" for path in files)
+        assert any(path.suffix == ".dfm" for path in files)

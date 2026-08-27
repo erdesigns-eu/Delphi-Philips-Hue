@@ -42,6 +42,7 @@ Hue.LoadLights;
 Hue.SetLightOn(Hue.Lights[0], True);
 Hue.SetLightBrightness(Hue.Lights[0], 127);
 Hue.SetLightColorTemperature(Hue.Lights[0], 250);
+Hue.SetLightXY(Hue.Lights[0], 0.30, 0.30);
 ```
 
 The same `SetLightOn`, `SetLightBrightness`, `SetLightColorTemperature`, and `SetGroupOn`
@@ -72,8 +73,9 @@ The matrix distinguishes implemented compatibility behavior from resources merel
 | Pair/application key | Yes | Yes (same pairing endpoint/key) |
 | Lights and state parsing | Yes | Yes (`light`) |
 | On/off, dimming, color temperature | Yes | Yes via native UUID payload |
+| Native CIE xy color | Yes | Yes; bridge performs device-gamut handling |
 | Hue/saturation legacy payload | Yes | No silent conversion; use native v2 color `xy` payload |
-| Rooms and zones | Groups | Yes (`room`/`zone` compatibility views) |
+| Rooms and zones | Groups | Yes, including grouped-light on/brightness state |
 | Grouped-light control | Group action | Yes via UUID overload |
 | Scenes/list/recall | Yes | Yes (`scene`, UUID recall) |
 | Bridge/resource identification | Config/numeric IDs | Bridge resource and UUID properties |
@@ -85,6 +87,10 @@ The matrix distinguishes implemented compatibility behavior from resources merel
 | Entertainment configuration | Group type in v1 | Not yet exposed by the compatibility facade |
 
 Hue v2 models devices, services, rooms, zones, `grouped_light`, scenes, and sensor services as UUID-addressed resources. This update implements the portions with sound mappings to the existing facade rather than pretending all v1 automation resources exist in v2.
+
+Hue v2 light loading also resolves each light's owning `device` resource. Existing
+`ManufacturerName`, `ModelID`, `ProductID`, and `ProductName` properties are populated from
+`product_data`, while `DeviceResourceID` retains the relationship for advanced callers.
 
 ## Resource identifiers
 
@@ -98,8 +104,32 @@ Hue v2 models devices, services, rooms, zones, `grouped_light`, scenes, and sens
 
 The legacy writable model properties still emit v1-shaped payloads. Under `hav2` they now raise
 `EHueUnsupportedOperation` rather than sending an invalid request; use the documented UUID overloads
-with native v2 JSON. Room/zone compatibility views currently report membership and identity, but their
-aggregate on/off state is not populated until a separate `grouped_light` resource is requested.
+with native v2 JSON. `LoadGroups` resolves the associated `grouped_light` resources and maps aggregate
+on/off and brightness into the compatibility `State` and `Action` objects. Because v2 exposes only an
+aggregate `on` value, `gsAnyOn` is used when the grouped light is on rather than claiming every member is on.
+
+## Native xy color
+
+`SetLightXY` and `SetGroupXY` accept CIE 1931 xy values. They validate the chromaticity domain
+(`x >= 0`, `y > 0`, and `x + y <= 1`) and serialize numbers with `System.JSON`. The helpers do not
+guess or clip against a product gamut: Hue Bridge/device gamut handling remains authoritative. This is
+intentional and avoids an inaccurate conversion from the legacy hue/saturation model.
+
+## Hue v2 event stream
+
+`Hue.EventStream.pas` provides `THueEventStream`, a cancellable background SSE client for
+`/eventstream/clip/v2`. Callbacks run on the worker thread so console/server applications can process
+events directly; VCL applications should queue UI work with `TThread.Queue`, as shown by the Event Monitor demo.
+
+```pascal
+Stream := THueEventStream.Create(BridgeHost, ApplicationKey);
+Stream.OnData := HandleHueEvent;
+Stream.OnError := HandleHueError;
+Stream.Start;
+```
+
+Destroy the stream, or call `Stop`, before shutting down the application. The component uses normal
+platform TLS validation and never disables certificate checks.
 
 ## Unit structure
 
@@ -110,6 +140,7 @@ aggregate on/off state is not populated until a separate `grouped_light` resourc
 | `Hue.Errors.pas` | HTTP, API, and unsupported-capability exceptions |
 | `Hue.JSON.pas` | Safe `System.JSON` parsing/access and Unicode quoting |
 | `Hue.Transport.pas` | Shared injectable `THTTPClient` transport |
+| `Hue.EventStream.pas` | Background Hue v2 Server-Sent Events client |
 | `Hue.API.pas` | Small common adapter contract/base |
 | `Hue.API.V1.pas` | v1 URL/authentication adapter |
 | `Hue.API.V2.pas` | v2 URL/header/capability and brightness adapter |
@@ -119,6 +150,34 @@ aggregate on/off state is not populated until a separate `grouped_light` resourc
 Applications that directly imported `untJSONParser` must migrate that unrelated parser usage to
 `System.JSON` or the documented helpers in `Hue.JSON`; only the Hue component's model-facing compatibility
 view is retained.
+
+## Packages and tests
+
+- `packages/HueRuntime.dpk` builds all runtime units.
+- `packages/HueDesign.dpk` installs `THueBridge` and its palette resource; build the runtime package first.
+- `tests/HueTests.dpr` is the DUnitX console runner.
+
+Example command lines from a configured RAD Studio developer prompt:
+
+```bat
+build.cmd
+```
+
+`build.cmd` compiles both packages, compiles the DUnitX runner, and runs it. Run the script from a RAD Studio developer prompt with DUnitX on the Delphi library path. Outputs are written below `build/`.
+
+## Demo applications
+
+| Demo | Purpose |
+|---|---|
+| `examples/SimpleVCL` | One-form v1/v2 light list with on/off control |
+| `examples/HomeAutomation` | Morning, evening, and away routines suitable as a home-automation starting point |
+| `examples/SceneBrowser` | Version-neutral scene discovery, identity display, and recall |
+| `examples/EventMonitor` | Thread-safe VCL display of raw Hue v2 event-stream JSON |
+| `examples/ConsoleHueDemo.dpr` | Minimal console usage |
+| `examples/VersionNeutralControl.dpr` | Broader console light/group/scene and resource-ID example |
+
+The demos contain no credentials. Enter bridge settings in the forms or use the documented environment
+variables for console examples.
 
 ## Migration from the original component
 
