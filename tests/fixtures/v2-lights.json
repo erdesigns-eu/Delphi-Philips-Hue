@@ -1,0 +1,1 @@
+{"errors":[],"data":[{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","id_v1":"/lights/1","type":"light","metadata":{"name":"Desk","archetype":"table_shade"},"product_data":{"model_id":"LCT001","product_name":"Hue lamp"},"on":{"on":true},"dimming":{"brightness":50.0},"color_temperature":{"mirek":250},"owner":{"rid":"dddddddd-1111-2222-3333-444444444444","rtype":"device"}}]}
