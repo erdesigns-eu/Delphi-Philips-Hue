@@ -4,7 +4,7 @@ interface
 
 uses
   System.SysUtils, System.Variants, System.Classes, System.JSON,
-  untJSONParser, Generics.Collections, Generics.Defaults,
+  Generics.Collections, Generics.Defaults,
   Hue.Types, Hue.Transport, Hue.API, Hue.JSON;
 
 // Maximum Lights, Groups, Schedules, Scenes, Sensors, Rules

@@ -31,6 +31,8 @@ def test_no_real_credentials_or_obsolete_transport():
     assert "TIdSSLIOHandlerSocketOpenSSL" not in source
     assert "hue-application-key" in (root / "Hue.API.V2.pas").read_text()
     assert "hav1" in source and "hav2" in source
+    assert not (root / "untJSONParser.pas").exists()
+    assert "untJSONParser" not in source
 
 
 def test_payload_and_endpoint_contracts():

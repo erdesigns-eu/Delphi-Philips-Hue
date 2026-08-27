@@ -34,6 +34,8 @@ type
     [Test] procedure MalformedJSON;
     /// <summary>Verifies structured Hue v1 and v2 errors become API exceptions.</summary>
     [Test] procedure HueErrorParsing;
+    /// <summary>Verifies v1 model access is backed by System.JSON compatibility nodes.</summary>
+    [Test] procedure LegacyV1CompatibilityParsing;
     /// <summary>Verifies schedules fail explicitly under v2.</summary>
     [Test] procedure UnsupportedV2Operation;
     /// <summary>Verifies UUID identifiers remain strings.</summary>
@@ -95,6 +97,20 @@ begin
   Assert.WillRaise(
     procedure begin THueJSON.RaiseIfHueError('{"errors":[{"description":"bad request"}],"data":[]}'); end,
     EHueAPIError);
+end;
+
+procedure THueCoreTests.LegacyV1CompatibilityParsing;
+var
+  Document: TJSON;
+begin
+  Document := TJSON.Parse('{"name":"Bureau \u2605","state":{"on":true,"bri":127}}');
+  try
+    Assert.AreEqual('Bureau ' + WideChar($2605), Document.Items['name'].AsString);
+    Assert.IsTrue(Document.Items['state'].Items['on'].AsBoolean);
+    Assert.AreEqual(127, Document.Items['state'].Items['bri'].AsInteger);
+  finally
+    Document.Free;
+  end;
 end;
 
 procedure THueCoreTests.UnsupportedV2Operation;

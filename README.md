@@ -102,7 +102,11 @@ aggregate on/off state is not populated until a separate `grouped_light` resourc
 | `Hue.API.V1.pas` | v1 URL/authentication adapter |
 | `Hue.API.V2.pas` | v2 URL/header/capability and brightness adapter |
 
-`untJSONParser.pas` remains temporarily because legacy model loaders are part of the compatibility facade. All new API v2 and transport code uses `System.JSON`; new code should use `Hue.JSON` rather than the custom parser.
+`Hue.JSON.pas` now uses `System.JSON` for both API generations. A small compatibility node view keeps the established v1 model loaders readable, but the handwritten `untJSONParser.pas` parser has been removed; parsing, Unicode decoding, scalar handling, and malformed-document detection are provided by the Delphi runtime.
+
+Applications that directly imported `untJSONParser` must migrate that unrelated parser usage to
+`System.JSON` or the documented helpers in `Hue.JSON`; only the Hue component's model-facing compatibility
+view is retained.
 
 ## Migration from the original component
 
