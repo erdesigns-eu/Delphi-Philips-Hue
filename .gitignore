@@ -1,0 +1,20 @@
+# Delphi generated output
+*.dcu
+*.dcp
+*.bpl
+*.map
+*.local
+*.identcache
+*.stat
+__history/
+Win32/
+Win64/
+tests/bin/
+tests/dcu/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local Delphi build output
+build/
