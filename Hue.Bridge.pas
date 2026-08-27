@@ -1,12 +1,11 @@
-unit untHueBridge;
+unit Hue.Bridge;
 
 interface
 
 uses
-  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes,
-  Vcl.Forms, IdBaseComponent, IdComponent, IdTCPConnection, IdTCPClient, IdHTTP,
-  untJSONParser, IdIOHandler, IdIOHandlerSocket, IdIOHandlerStack, IdSSL, IdSSLOpenSSL,
-  Generics.Collections, Generics.Defaults;
+  System.SysUtils, System.Variants, System.Classes, System.JSON,
+  Generics.Collections, Generics.Defaults,
+  Hue.Types, Hue.Transport, Hue.API, Hue.JSON;
 
 // Maximum Lights, Groups, Schedules, Scenes, Sensors, Rules
 const
@@ -92,6 +91,8 @@ type
     FProductName: string;
     FLightType: string;
     FUniqueID: string;
+    FResourceID: string;
+    FDeviceResourceID: string;
     FState: THueLightState;
 
     FOnChange: THueLightChangeEvent;
@@ -106,6 +107,10 @@ type
     destructor Destroy; override;
 
     procedure LoadLight(AIndex: Integer; ALight: TJSON);
+    /// <summary>Loads a Hue API v2 light while retaining its UUID resource identifier.</summary>
+    procedure LoadLightV2(const AResourceID, ADeviceResourceID, AName,
+      AManufacturerName, AModelID, AProductID, AProductName: string;
+      const AOn: Boolean; const ABrightness: Integer; const AColorTemperature: Integer);
     procedure Assign(Source: TPersistent); override;
     procedure Identify;
   published
@@ -117,6 +122,10 @@ type
     property ProductName: string read FProductName;
     property LightType: string read FLightType;
     property UniqueID: string read FUniqueID;
+    /// <summary>Gets the Hue API v2 UUID, or an empty string for a v1 light.</summary>
+    property ResourceID: string read FResourceID;
+    /// <summary>Gets the owning Hue API v2 device UUID used for product metadata.</summary>
+    property DeviceResourceID: string read FDeviceResourceID;
     property State: THueLightState read FState write FState;
 
     property OnChange: THueLightChangeEvent read FOnChange write FOnChange;
@@ -138,6 +147,8 @@ type
     constructor Create(AOwner: TPersistent);
     function Add: THueLight;
     function GetLightByID(const AID: Integer) : THueLight;
+    /// <summary>Finds a light by its Hue API v2 UUID, or returns nil when it is absent.</summary>
+    function GetLightByResourceID(const AResourceID: string): THueLight;
 
     property Items[Index: Integer]: THueLight read GetItem write SetItem;
     property OnLightChanged: THueUpdateLightEvent read FOnLightChange write FOnLightChange;
@@ -174,6 +185,8 @@ type
     FSensors: TAIntegerList;
     FType: THueGroupType;
     FState: THueGroupState;
+    FResourceID: string;
+    FGroupedLightResourceID: string;
 
     FOnChange: THueGroupChangeEvent;
     FOnIdentify: THueGroupIdentifyEvent;
@@ -190,6 +203,10 @@ type
     destructor Destroy; override;
 
     procedure LoadGroup(AIndex: Integer; AGroup: TJSON);
+    /// <summary>Loads a v2 room, zone, or grouped-light compatibility view.</summary>
+    procedure LoadGroupV2(const AResourceID, AGroupedLightResourceID, AName: string;
+      const AType: THueGroupType; const AAnyOn, AAllOn: Boolean;
+      const ABrightness: Integer);
     procedure Assign(Source: TPersistent); override;
     procedure Identify;
   published
@@ -201,6 +218,10 @@ type
     property Sensors: TAIntegerList read FSensors;
     property GroupType: THueGroupType read FType;
     property State: THueGroupState read FState;
+    /// <summary>Gets the Hue API v2 UUID, or an empty string for a v1 group.</summary>
+    property ResourceID: string read FResourceID;
+    /// <summary>Gets the v2 grouped_light service UUID used to control this room or zone.</summary>
+    property GroupedLightResourceID: string read FGroupedLightResourceID;
 
     property OnChange: THueGroupChangeEvent read FOnChange write FOnChange;
     property OnIdentify: THueGroupIdentifyEvent read FOnIdentify write FOnIdentify;
@@ -221,6 +242,10 @@ type
     constructor Create(AOwner: TPersistent);
     function Add: THueGroup;
     function GetGroupByID(const AID: Integer) : THueGroup;
+    /// <summary>Finds a room or zone by its Hue API v2 UUID, or returns nil when it is absent.</summary>
+    function GetGroupByResourceID(const AResourceID: string): THueGroup;
+    /// <summary>Finds a room or zone by its grouped_light service UUID, or returns nil when it is absent.</summary>
+    function GetGroupByGroupedLightResourceID(const AResourceID: string): THueGroup;
 
     property Items[Index: Integer]: THueGroup read GetItem write SetItem;
     property OnGroupChanged: THueUpdateGroupEvent read FOnGroupChange write FOnGroupChange;
@@ -332,6 +357,7 @@ type
     FPicture: string;
     FOwner: string;
     FLights: TAIntegerList;
+    FResourceID: string;
   protected
     function GetDisplayName: string; override;
   public
@@ -339,6 +365,8 @@ type
     destructor Destroy; override;
 
     procedure LoadScene(AIndex: string; AScene: TJSON);
+    /// <summary>Loads a v2 scene compatibility view.</summary>
+    procedure LoadSceneV2(const AResourceID, AName, AGroupResourceID: string);
     procedure Assign(Source: TPersistent); override;
   published
     property HueIndex: string read FHueIndex;
@@ -347,6 +375,8 @@ type
     property Picture: string read FPicture;
     property Owner: string read FOwner;
     property Lights: TAIntegerList read FLights;
+    /// <summary>Gets the Hue API v2 scene UUID, or the v1 scene identifier.</summary>
+    property ResourceID: string read FResourceID;
   end;
 
   // Hue Scene Collection
@@ -358,6 +388,8 @@ type
     constructor Create(AOwner: TPersistent);
     function Add: THueScene;
     function GetSceneByID(const AID: string) : THueScene;
+    /// <summary>Finds a scene by its Hue API v2 UUID, or returns nil when it is absent.</summary>
+    function GetSceneByResourceID(const AResourceID: string): THueScene;
 
     property Items[Index: Integer]: THueScene read GetItem write SetItem;
   end;
@@ -380,6 +412,7 @@ type
     FSWVersion: string;
     FTimezone: string;
     FZigbeeChannel: Integer;
+    FResourceID: string;
 
     FOnChange: THueConfigurationChanged;
 
@@ -391,6 +424,8 @@ type
     procedure AssignTo(Dest: TPersistent); override;
   public
     constructor Create(AOwner: TObject);
+    /// <summary>Loads fields that have direct equivalents on a Hue API v2 bridge resource.</summary>
+    procedure LoadV2(const AResourceID, ABridgeID, ATimeZone: string);
   published
     property APIVersion: string read FAPIVersion;
     property BridgeID: string read FBridgeID;
@@ -403,6 +438,8 @@ type
     property SWVersion: string read FSWVersion;
     property TimeZone: string read FTimezone write SetTimeZone;
     property ZigbeeChannel: Integer read FZigbeeChannel write SetZigbeeChannel;
+    /// <summary>Gets the Hue API v2 bridge UUID.</summary>
+    property ResourceID: string read FResourceID;
 
     property OnChange: THueConfigurationChanged read FOnChange write FOnChange;
   end;
@@ -466,8 +503,9 @@ type
   THueBridge = class(TComponent)
   private
     { Private declarations }
-    FHTTP: TidHTTP;
-    FSSL: TIdSSLIOHandlerSocketOpenSSL;
+    FTransport: IHueTransport;
+    FAPI: IHueAPI;
+    FAPIVersion: THueAPIVersion;
     FLights: THueLights;
     FGroups: THueGroups;
     FSchedules: THueSchedules;
@@ -479,6 +517,7 @@ type
     FLastResponse: string;
     FBridgeIP: string;
     FUsername: string;
+    FUseragent: string;
     FUpdateOnLightChange: Boolean;
     FUpdateOnGroupChange: Boolean;
     FUpdateOnScheduleChange: Boolean;
@@ -500,6 +539,14 @@ type
     procedure SetNetwork(const ANetwork: THueBridgeNetwork);
     procedure SetUseragent(const AUseragent: string);
     function GetUseragent: string;
+    /// <summary>Switches adapters while preserving the component and loaded object model.</summary>
+    procedure SetAPIVersion(const AValue: THueAPIVersion);
+    /// <summary>Recreates the internal API adapter after configuration changes.</summary>
+    procedure RebuildAPI;
+    /// <summary>Raises a clear exception when the selected API lacks an operation.</summary>
+    procedure RequireCapability(const AOperation: string);
+    /// <summary>Extracts a legacy relative path before dispatching through an adapter.</summary>
+    function RequestPath(const AURL: string): string;
   protected
     { Protected declarations }
     procedure UpdateLightChange(Sender: TObject; URL: string; PUTData: string);
@@ -529,7 +576,17 @@ type
     function SearchNewLights : Boolean;
     function DeleteLight(const AID: Integer) : Boolean;
     function UpdateLight(const AID: Integer) : Boolean;
-    function UpdateLightState(const AID: Integer; const AData: string) : Boolean;
+    function UpdateLightState(const AID: Integer; const AData: string) : Boolean; overload;
+    /// <summary>Updates a v2 light identified by UUID using a native v2 JSON payload.</summary>
+    function UpdateLightState(const AResourceID, AData: string): Boolean; overload;
+    /// <summary>Switches a light through the selected API using the supplied model identity.</summary>
+    function SetLightOn(const ALight: THueLight; const AOn: Boolean): Boolean;
+    /// <summary>Sets 1..254 legacy brightness and converts it to v2 percentage when required.</summary>
+    function SetLightBrightness(const ALight: THueLight; const ABrightness: Integer): Boolean;
+    /// <summary>Sets a light color temperature in mirek through the selected API.</summary>
+    function SetLightColorTemperature(const ALight: THueLight; const AMirek: Integer): Boolean;
+    /// <summary>Sets native CIE xy coordinates after validating the chromaticity domain; bridge gamut handling remains authoritative.</summary>
+    function SetLightXY(const ALight: THueLight; const AX, AY: Double): Boolean;
 
     // Groups
     procedure LoadGroups;
@@ -538,7 +595,13 @@ type
       const GroupType: THueGroupType; const GroupClass: THueGroupClass) : Boolean;
     function DeleteGroup(const AID: Integer) : Boolean;
     function UpdateGroup(const AID: Integer) : Boolean;
-    function UpdateGroupAction(const AID: Integer; const AData: string) : Boolean;
+    function UpdateGroupAction(const AID: Integer; const AData: string) : Boolean; overload;
+    /// <summary>Updates a v2 grouped_light identified by UUID using a native v2 JSON payload.</summary>
+    function UpdateGroupAction(const AResourceID, AData: string): Boolean; overload;
+    /// <summary>Switches a group through the selected API using its numeric or grouped_light identity.</summary>
+    function SetGroupOn(const AGroup: THueGroup; const AOn: Boolean): Boolean;
+    /// <summary>Sets CIE xy coordinates on a group through the selected API after validating the chromaticity domain.</summary>
+    function SetGroupXY(const AGroup: THueGroup; const AX, AY: Double): Boolean;
 
     // Schedules
     procedure LoadSchedules;
@@ -552,19 +615,27 @@ type
 
     // Scenes
     procedure LoadScenes;
-    function RecallScene(const AGroup: Integer; const AScene: string) : Boolean;
+    function RecallScene(const AGroup: Integer; const AScene: string) : Boolean; overload;
+    /// <summary>Recalls a v2 scene by UUID; the group argument is implicit in the v2 scene resource.</summary>
+    function RecallScene(const ASceneResourceID: string): Boolean; overload;
+    /// <summary>Recalls a scene through the selected API using the supplied model identity.</summary>
+    function RecallScene(const AScene: THueScene): Boolean; overload;
+
+    /// <summary>Replaces the HTTP boundary, primarily for deterministic tests.</summary>
+    procedure SetTransport(const ATransport: IHueTransport);
 
     property Lights: THueLights read FLights write SetLights;
     property Groups: THueGroups read FGroups write SetGroups;
     property Schedules: THueSchedules read FSchedules write SetSchedules;
     property Scenes: THueScenes read FScenes write SetScenes;
-    property HTTP: TidHTTP read FHTTP;
     property LastResponse: string read FLastResponse;
     property LastError: string read FLastError;
   published
     { Published declarations }
     property IP: string read FBridgeIP write FBridgeIP;
     property Username: string read FUsername write FUSername;
+    /// <summary>Selects Hue API v1 or v2 without replacing the component instance.</summary>
+    property APIVersion: THueAPIVersion read FAPIVersion write SetAPIVersion default hav1;
     property UpdateOnLightChange: Boolean read FUpdateOnLightChange write FUpdateOnLightChange default True;
     property UpdateOnGroupChange: Boolean read FUpdateOnGroupChange write FUpdateOnGroupChange default True;
     property UpdateOnScheduleChange: Boolean read FUpdateOnScheduleChange write FUpdateOnScheduleChange default True;
@@ -585,6 +656,9 @@ type
 procedure Register;
 
 implementation
+
+uses
+  Hue.API.V1, Hue.API.V2, Hue.Errors;
 
 // URL Constants
 //------------------------------------------------------------------------------
@@ -719,7 +793,7 @@ begin
   if AEffect <> Effect then
   begin
     FEffect := AEffect;
-    UpdateState(Format('{"effect": %s}', [SEffect[Effect]]));
+    UpdateState(Format('{"effect":"%s"}', [SEffect[Effect]]));
   end;
 end;
 
@@ -807,6 +881,8 @@ var
   AState            : TJSON;
 begin
   FHueIndex := AIndex;
+  FResourceID := '';
+  FDeviceResourceID := '';
   if ALight.Items.ContainsKey('manufacturername') then
     FManufacturerName := ALight.Items.Items['manufacturername'].AsString;
   if ALight.Items.ContainsKey('modelid') then
@@ -824,6 +900,16 @@ begin
   if ALight.Items.ContainsKey('state') then
   begin
     AState := ALight.Items.Items['state'];
+    AAlert := saNone;
+    ABrightness := 1;
+    AColorMode := cmNone;
+    AColorTemperature := 0;
+    AEffect := seNone;
+    AHue := 0;
+    AMode := '';
+    AON := False;
+    AReachable := False;
+    ASaturation := 0;
     // Alert
     if AState.Items.ContainsKey('alert') then
     begin
@@ -858,7 +944,7 @@ begin
     // Effect
     if AState.Items.ContainsKey('effect') then
     begin
-      if (AState.Items.Items['colormode'].AsString = 'colorloop') then
+      if (AState.Items.Items['effect'].AsString = 'colorloop') then
         AEffect := seColorLoop
       else
         AEffect := seNone;
@@ -882,9 +968,24 @@ begin
   end;
 end;
 
+procedure THueLight.LoadLightV2(const AResourceID, ADeviceResourceID, AName,
+  AManufacturerName, AModelID, AProductID, AProductName: string;
+  const AOn: Boolean; const ABrightness, AColorTemperature: Integer);
+begin
+  FHueIndex := 0;
+  FResourceID := AResourceID;
+  FDeviceResourceID := ADeviceResourceID;
+  FName := AName;
+  FManufacturerName := AManufacturerName;
+  FModelID := AModelID;
+  FProductID := AProductID;
+  FProductName := AProductName;
+  FState.LoadLight(saNone, ABrightness, cmNone, AColorTemperature, seNone,
+    0, 'normal', AOn, True, 0);
+end;
+
 procedure THueLight.Assign(Source: TPersistent);
 begin
-  inherited;
   if Source is THueLight then
   begin
     FHueIndex         := THueLight(Source).HueIndex;
@@ -895,8 +996,12 @@ begin
     FProductName      := THueLight(Source).ProductName;
     FLightType        := THueLight(Source).LightType;
     FUniqueID         := THueLight(Source).UniqueID;
+    FResourceID       := THueLight(Source).ResourceID;
+    FDeviceResourceID := THueLight(Source).DeviceResourceID;
     THueLight(Source).State.AssignTo(State);
-  end;
+  end
+  else
+    inherited;
 end;
 
 procedure THueLight.Identify;
@@ -1098,6 +1203,8 @@ var
   I                 : Integer;
 begin
   FHueIndex := AIndex;
+  FResourceID := '';
+  FGroupedLightResourceID := '';
   // Class
   if AGroup.Items.ContainsKey('class') then
     FClass := GetGroupClassFromString(AGroup.Items.Items['class'].AsString)
@@ -1149,6 +1256,16 @@ begin
   if AGroup.Items.ContainsKey('action') then
   begin
     AAction := AGroup.Items.Items['action'];
+    AAlert := saNone;
+    ABrightness := 1;
+    AColorMode := cmNone;
+    AColorTemperature := 0;
+    AEffect := seNone;
+    AHue := 0;
+    AMode := '';
+    AON := False;
+    AReachable := False;
+    ASaturation := 0;
     // Alert
     if AAction.Items.ContainsKey('alert') then
     begin
@@ -1183,7 +1300,7 @@ begin
     // Effect
     if AAction.Items.ContainsKey('effect') then
     begin
-      if (AAction.Items.Items['colormode'].AsString = 'colorloop') then
+      if (AAction.Items.Items['effect'].AsString = 'colorloop') then
         AEffect := seColorLoop
       else
         AEffect := seNone;
@@ -1207,20 +1324,47 @@ begin
   end;
 end;
 
+function THueLights.GetLightByResourceID(const AResourceID: string): THueLight;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to Count - 1 do
+    if SameText(Items[I].ResourceID, AResourceID) then
+      Exit(Items[I]);
+end;
+
+procedure THueGroup.LoadGroupV2(const AResourceID, AGroupedLightResourceID,
+  AName: string; const AType: THueGroupType; const AAnyOn, AAllOn: Boolean;
+  const ABrightness: Integer);
+begin
+  FHueIndex := 0;
+  FResourceID := AResourceID;
+  FGroupedLightResourceID := AGroupedLightResourceID;
+  FName := AName;
+  FType := AType;
+  if AAllOn then FState := gsAllOn else if AAnyOn then FState := gsAnyOn else FState := gsAllOff;
+  FAction.LoadLight(saNone, ABrightness, cmNone, 0, seNone, 0, 'normal',
+    AAnyOn, True, 0);
+end;
+
 procedure THueGroup.Assign(Source: TPersistent);
 begin
-  inherited;
   if Source is THueGroup then
   begin
     FHueIndex := THueGroup(Source).HueIndex;
     FClass    := THueGroup(Source).GroupClass;
-    FLights   := THueGroup(Source).Lights;
+    FLights   := Copy(THueGroup(Source).Lights, 0, Length(THueGroup(Source).Lights));
     FName     := THueGroup(Source).Name;
-    FSensors  := THueGroup(Source).Sensors;
+    FSensors  := Copy(THueGroup(Source).Sensors, 0, Length(THueGroup(Source).Sensors));
     FType     := THueGroup(Source).GroupType;
     FState    := THueGroup(Source).State;
+    FResourceID := THueGroup(Source).ResourceID;
+    FGroupedLightResourceID := THueGroup(Source).GroupedLightResourceID;
     THueGroup(Source).Action.AssignTo(Action);
-  end;
+  end
+  else
+    inherited;
 end;
 
 procedure THueGroup.Identify;
@@ -1304,7 +1448,7 @@ procedure THueScheduleCommand.AssignTo(Dest: TPersistent);
 begin
   if Dest is THueScheduleCommand then
   begin
-    with THueLightState(Dest) do
+    with THueScheduleCommand(Dest) do
     begin
       FAddress := Self.Address;
       FBody    := Self.Body;
@@ -1370,7 +1514,6 @@ end;
 
 procedure THueSchedule.Assign(Source: TPersistent);
 begin
-  inherited;
   if Source is THueSchedule then
   begin
     FHueIndex    := THueSchedule(Source).HueIndex;
@@ -1383,7 +1526,9 @@ begin
     FAutoDelete  := THueSchedule(Source).AutoDelete;
     FRecycle     := THueSchedule(Source).Recycle;
     THueSchedule(Source).Command.AssignTo(FCommand);
-  end;
+  end
+  else
+    inherited;
 end;
 
 procedure THueSchedule.SetName(const AName: string);
@@ -1554,7 +1699,6 @@ end;
 
 procedure THueScene.Assign(Source: TPersistent);
 begin
-  inherited;
   if Source is THueScene then
   begin
     FHueIndex := THueScene(Source).HueIndex;
@@ -1562,7 +1706,11 @@ begin
     FGroup    := THueScene(Source).Group;
     FPicture  := THueScene(Source).Picture;
     FOwner    := THueScene(Source).Owner;
-  end;
+    FResourceID := THueScene(Source).ResourceID;
+    FLights := Copy(THueScene(Source).Lights, 0, Length(THueScene(Source).Lights));
+  end
+  else
+    inherited;
 end;
 
 procedure THueScene.LoadScene(AIndex: string; AScene: TJSON);
@@ -1570,6 +1718,7 @@ var
   I : Integer;
 begin
   FHueIndex := AIndex;
+  FResourceID := AIndex;
   if AScene.Items.ContainsKey('group') then
     FGroup := AScene.Items.Items['group'].AsInteger;
   if AScene.Items.ContainsKey('name') then
@@ -1587,6 +1736,38 @@ begin
   begin
     SetLength(FLights, 0);
   end;
+end;
+
+function THueGroups.GetGroupByResourceID(const AResourceID: string): THueGroup;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to Count - 1 do
+    if SameText(Items[I].ResourceID, AResourceID) then
+      Exit(Items[I]);
+end;
+
+function THueGroups.GetGroupByGroupedLightResourceID(
+  const AResourceID: string): THueGroup;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to Count - 1 do
+    if SameText(Items[I].GroupedLightResourceID, AResourceID) then
+      Exit(Items[I]);
+end;
+
+procedure THueScene.LoadSceneV2(const AResourceID, AName,
+  AGroupResourceID: string);
+begin
+  FHueIndex := AResourceID;
+  FResourceID := AResourceID;
+  FName := AName;
+  FOwner := AGroupResourceID;
+  FGroup := 0;
+  SetLength(FLights, 0);
 end;
 
 // THueScenes Class
@@ -1654,6 +1835,7 @@ begin
       FSWVersion        := Self.SWVersion;
       FTimezone         := Self.TimeZone;
       FZigbeeChannel    := Self.ZigbeeChannel;
+      FResourceID       := Self.ResourceID;
     end
   end
   else
@@ -1850,11 +2032,9 @@ end;
 constructor THueBridge.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
-  FHTTP   := TidHTTP.Create(Self);
-  FSSL    := TIdSSLIOHandlerSocketOpenSSL.Create(Self);
-  FHTTP.IOHandler := FSSL;
-  FHTTP.Request.UserAgent :='ERDesigns HueBridge';
-  FSSL.SSLOptions.Method  := sslvSSLv23;
+  FTransport := THueHTTPTransport.Create;
+  FAPIVersion := hav1;
+  FUseragent := 'Delphi-Philips-Hue/2';
   FLights := THueLights.Create(Self);
   FLights.OnLightChanged  := UpdateLightChange;
   FLights.OnLightIdentify := IdentifyLight;
@@ -1875,12 +2055,14 @@ end;
 
 destructor THueBridge.Destroy;
 begin
-  FHTTP.Free;
+  FAPI := nil;
+  FTransport := nil;
   FLights.Free;
   FGroups.Free;
   FSchedules.Free;
   FScenes.Free;
   FConfiguration.Free;
+  FNetwork.Free;
   inherited Destroy;
 end;
 
@@ -1916,95 +2098,151 @@ end;
 
 procedure THueBridge.SetUseragent(const AUseragent: string);
 begin
-  FHTTP.Request.UserAgent := AUseragent;
+  FUseragent := AUseragent;
+  if Assigned(FTransport) then
+    FTransport.SetUserAgent(AUseragent);
+end;
+
+function THueScenes.GetSceneByResourceID(
+  const AResourceID: string): THueScene;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to Count - 1 do
+    if SameText(Items[I].ResourceID, AResourceID) then
+      Exit(Items[I]);
+end;
+
+procedure THueBridgeConfiguration.LoadV2(const AResourceID, ABridgeID,
+  ATimeZone: string);
+begin
+  FResourceID := AResourceID;
+  FBridgeID := ABridgeID;
+  FTimezone := ATimeZone;
 end;
 
 function THueBridge.GetUseragent : string;
 begin
-  Result := FHTTP.Request.UserAgent;
+  Result := FUseragent;
+end;
+
+procedure THueBridge.SetAPIVersion(const AValue: THueAPIVersion);
+begin
+  if FAPIVersion <> AValue then begin FAPIVersion := AValue; RebuildAPI; end;
+end;
+
+procedure THueBridge.SetTransport(const ATransport: IHueTransport);
+begin
+  if not Assigned(ATransport) then
+    raise EArgumentNilException.Create('ATransport');
+  FTransport := ATransport;
+  FTransport.SetUserAgent(FUseragent);
+  RebuildAPI;
+end;
+
+procedure THueBridge.RebuildAPI;
+begin
+  case FAPIVersion of
+    hav1: FAPI := Hue.API.V1.THueAPIV1.Create(IP, Username, FTransport);
+    hav2: FAPI := Hue.API.V2.THueAPIV2.Create(IP, Username, FTransport);
+  end;
+end;
+
+procedure THueBridge.RequireCapability(const AOperation: string);
+begin
+  RebuildAPI;
+  FAPI.RequireCapability(AOperation);
+end;
+
+function THueBridge.RequestPath(const AURL: string): string;
+var Marker: string; P: Integer;
+begin
+  Marker := '/api/' + Username;
+  P := Pos(Marker, AURL);
+  if P > 0 then Result := Copy(AURL, P + Length(Marker), MaxInt) else Result := AURL;
+  if FAPIVersion = hav2 then
+  begin
+    if SameText(Result, '/lights') then Result := '/light';
+    if SameText(Result, '/scenes') then Result := '/scene';
+  end;
 end;
 
 procedure THueBridge.UpdateLightChange(Sender: TObject; URL: string; PUTData: string);
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create(
+      'model property updates in v2; use UpdateLightState(ResourceID, native v2 JSON)', hav2);
   if FUpdateOnLightChange then
     FLastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + URL, PUTData);
 end;
 
 procedure THueBridge.UpdateGroupChange(Sender: TObject; URL: string; PUTData: string);
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create(
+      'model property updates in v2; use UpdateGroupAction(grouped_light ResourceID, native v2 JSON)', hav2);
   if FUpdateOnGroupChange then
     FLastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + URL, PUTData);
 end;
 
 procedure THueBridge.UpdateScheduleChange(Sender: TObject; URL: string; PUTData: string);
 begin
+  RequireCapability('schedules');
   if FUpdateOnScheduleChange then
     FLastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + URL, PUTData);
 end;
 
 procedure THueBridge.UpdateConfiguration(Sender: TObject; URL: string; PUTData: string);
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create('legacy configuration property updates', hav2);
   FlastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + URL, PUTData);
 end;
 
 procedure THueBridge.IdentifyLight(Sender: TObject; ID: Integer);
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create('identifying a light through a numeric ID', hav2);
   FlastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + Format(LightStateURL, [ID]), '{"alert":"select"}');
 end;
 
 procedure THueBridge.IdentifyGroup(Sender: TObject; ID: Integer);
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create('identifying a group through a numeric ID', hav2);
   FlastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + Format(GroupStateURL, [ID]), '{"alert":"select"}');
 end;
 
 function THueBridge.HTTPGet(const AURL: string) : string;
+var H: THueHeaders;
 begin
-  try
-    Result := HTTP.Get(AURL);
-  except
-    Result := '';
-  end;
+  if SameText(AURL, BridgeIPURL) then begin
+    H := THueHeaders.Create;
+    try Result := FTransport.Execute(hhmGet, AURL, '', H); finally H.Free; end;
+  end else begin RebuildAPI; Result := FAPI.Request(hhmGet, RequestPath(AURL), ''); end;
 end;
 
 function THueBridge.HTTPPost(const AURL: string; const AText: string) : string;
-var
-  S : TStringStream;
+var H: THueHeaders;
 begin
-  S := TStringStream.Create(AText);
-  try
-    try
-      Result := HTTP.Post(AURL, S);
-    except
-      Result := '';
-    end;
-  finally
-    S.Free;
-  end;
+  if Pos('/api', AURL) = Length(AURL) - 3 then begin
+    H := THueHeaders.Create;
+    try H.Add('Content-Type', 'application/json; charset=utf-8');
+      Result := FTransport.Execute(hhmPost, AURL, AText, H); finally H.Free; end;
+  end else begin RebuildAPI; Result := FAPI.Request(hhmPost, RequestPath(AURL), AText); end;
 end;
 
 function THueBridge.HTTPPut(const AURL: string; const AText: string) : string;
-var
-  S : TStringStream;
 begin
-  S := TStringStream.Create(AText);
-  try
-    try
-      Result := HTTP.Put(AURL, S);
-    except
-      Result := '';
-    end;
-  finally
-    S.Free;
-  end;
+  RebuildAPI;
+  Result := FAPI.Request(hhmPut, RequestPath(AURL), AText);
 end;
 
 function THueBridge.HTTPDelete(const AURL: string) : string;
 begin
-  try
-    Result := HTTP.Delete(AURL);
-  except
-    Result := '';
-  end;
+  RebuildAPI;
+  Result := FAPI.Request(hhmDelete, RequestPath(AURL), '');
 end;
 
 // Bridge ----------------------------------------------------------------------
@@ -2019,7 +2257,7 @@ begin
   FLastResponse := R;
   J := TJSON.Parse(R);
   try
-    if J.IsList and (J.ListItems.Count >= 1) and (J.ListItems.Count >= ABridge) then
+    if J.IsList and (ABridge >= 0) and (ABridge < J.ListItems.Count) then
     begin
       B := J.ListItems[ABridge];
       if B.Items.ContainsKey('internalipaddress') then
@@ -2041,7 +2279,8 @@ var
   B : TJSON;
 begin
   Result := False;
-  R := HTTPPost(Format(BridgePairURL, [IP]), Format('{"devicetype":"%s"}', [AName]));
+  R := HTTPPost(Format(BridgePairURL, [IP]),
+    Format('{"devicetype":%s}', [Hue.JSON.THueJSON.Quote(AName)]));
   FLastResponse := R;
   J := TJSON.Parse(R);
   try
@@ -2071,7 +2310,30 @@ procedure THueBridge.LoadBridgeConfiguration;
 var
   R : string;
   J : TJSON;
+  JV: System.JSON.TJSONValue;
+  Root, Item: System.JSON.TJSONObject;
+  Data: System.JSON.TJSONArray;
 begin
+  if FAPIVersion = hav2 then
+  begin
+    R := HTTPGet(Format(BaseURL, [IP, Username]) + '/bridge');
+    JV := Hue.JSON.THueJSON.Parse(R);
+    try
+      if not (JV is System.JSON.TJSONObject) then
+        raise EHueAPIError.Create('Hue v2 bridge response must be an object');
+      Root := JV as System.JSON.TJSONObject;
+      Data := Hue.JSON.THueJSON.ArrayValue(Root, 'data');
+      if Assigned(Data) and (Data.Count > 0) and (Data.Items[0] is System.JSON.TJSONObject) then
+      begin
+        Item := System.JSON.TJSONObject(Data.Items[0]);
+        FConfiguration.LoadV2(Hue.JSON.THueJSON.StringValue(Item, 'id'),
+          Hue.JSON.THueJSON.StringValue(Item, 'bridge_id'),
+          Hue.JSON.THueJSON.StringValue(Item, 'time_zone'));
+      end;
+    finally JV.Free; end;
+    if Assigned(FOnConfigurationLoaded) then FOnConfigurationLoaded(Self);
+    Exit;
+  end;
   R := HTTPGet(Format(BaseURL, [IP, Username]) + ConfigURL);
   J := TJSON.Parse(R);
   try
@@ -2090,8 +2352,84 @@ var
   J : TJSON;
   I : Integer;
   A : TArray<string>;
+  JV: System.JSON.TJSONValue;
+  Root, Item, Meta, ProductData, OnObject, Dimming, CT, Owner,
+    DeviceRoot, DeviceItem, DeviceMeta: System.JSON.TJSONObject;
+  Data, Devices: System.JSON.TJSONArray;
+  DeviceJV: System.JSON.TJSONValue;
+  DeviceIndex, LightBrightness: Integer;
+  DeviceID, ManufacturerName, ModelID, ProductID, ProductName: string;
+  L: THueLight;
 begin
   R := HTTPGet(Format(BaseURL, [IP, Username]) + LightsURL);
+  if FAPIVersion = hav2 then
+  begin
+    DeviceJV := Hue.JSON.THueJSON.Parse(
+      HTTPGet(Format(BaseURL, [IP, Username]) + '/device'));
+    JV := nil;
+    try
+      JV := Hue.JSON.THueJSON.Parse(R);
+      if not (DeviceJV is System.JSON.TJSONObject) then
+        raise EHueAPIError.Create('Hue v2 device response must be an object');
+      DeviceRoot := System.JSON.TJSONObject(DeviceJV);
+      Devices := Hue.JSON.THueJSON.ArrayValue(DeviceRoot, 'data');
+      if not (JV is System.JSON.TJSONObject) then raise EHueAPIError.Create('Hue v2 response must be an object');
+      Root := System.JSON.TJSONObject(JV);
+      Data := Hue.JSON.THueJSON.ArrayValue(Root, 'data');
+      FLights.Clear;
+      if Assigned(Data) then for I := 0 to Data.Count - 1 do
+      begin
+        if not (Data.Items[I] is System.JSON.TJSONObject) then Continue;
+        Item := System.JSON.TJSONObject(Data.Items[I]);
+        Meta := Hue.JSON.THueJSON.ObjectValue(Item, 'metadata');
+        Owner := Hue.JSON.THueJSON.ObjectValue(Item, 'owner');
+        DeviceID := Hue.JSON.THueJSON.StringValue(Owner, 'rid');
+        ManufacturerName := '';
+        ModelID := '';
+        ProductID := '';
+        ProductName := '';
+        if Assigned(Devices) then
+          for DeviceIndex := 0 to Devices.Count - 1 do
+            if Devices.Items[DeviceIndex] is System.JSON.TJSONObject then
+            begin
+              DeviceItem := System.JSON.TJSONObject(Devices.Items[DeviceIndex]);
+              if SameText(Hue.JSON.THueJSON.StringValue(DeviceItem, 'id'),
+                DeviceID) then
+              begin
+                DeviceMeta := Hue.JSON.THueJSON.ObjectValue(DeviceItem, 'metadata');
+                ProductData := Hue.JSON.THueJSON.ObjectValue(DeviceItem, 'product_data');
+                if Hue.JSON.THueJSON.StringValue(Meta, 'name') = '' then
+                  Meta := DeviceMeta;
+                ManufacturerName := Hue.JSON.THueJSON.StringValue(ProductData,
+                  'manufacturer_name');
+                ModelID := Hue.JSON.THueJSON.StringValue(ProductData, 'model_id');
+                ProductID := Hue.JSON.THueJSON.StringValue(ProductData, 'product_id');
+                ProductName := Hue.JSON.THueJSON.StringValue(ProductData, 'product_name');
+                Break;
+              end;
+            end;
+        OnObject := Hue.JSON.THueJSON.ObjectValue(Item, 'on');
+        Dimming := Hue.JSON.THueJSON.ObjectValue(Item, 'dimming');
+        CT := Hue.JSON.THueJSON.ObjectValue(Item, 'color_temperature');
+        L := FLights.Add;
+        if Assigned(Dimming) then
+          LightBrightness := Hue.API.V2.THueAPIV2.BrightnessFromV2(
+            Hue.JSON.THueJSON.NumberValue(Dimming, 'brightness'))
+        else
+          LightBrightness := 1;
+        L.LoadLightV2(Hue.JSON.THueJSON.StringValue(Item, 'id'), DeviceID,
+          Hue.JSON.THueJSON.StringValue(Meta, 'name'),
+          ManufacturerName, ModelID, ProductID, ProductName,
+          Hue.JSON.THueJSON.BooleanValue(OnObject, 'on'), LightBrightness,
+          Round(Hue.JSON.THueJSON.NumberValue(CT, 'mirek')));
+      end;
+    finally
+      JV.Free;
+      DeviceJV.Free;
+    end;
+    if Assigned(FOnLightsLoaded) then FOnLightsLoaded(Self);
+    Exit;
+  end;
   J := TJSON.Parse(R);
   try
     FLights.Clear;
@@ -2112,6 +2450,7 @@ var
   I : Integer;
   L : THueLight;
 begin
+  if FAPIVersion = hav2 then begin LoadLights; if Assigned(FOnLightsUpdated) then FOnLightsUpdated(Self); Exit; end;
   R := HTTPGet(Format(BaseURL, [IP, Username]) + LightsURL);
   J := TJSON.Parse(R);
   try
@@ -2138,6 +2477,7 @@ var
   J : TJSON;
   B : TJSON;
 begin
+  RequireCapability('search new lights');
   Result := False;
   R := HTTPPost(Format(BaseURL, [IP, Username]) + LightsURL, '');
   J := TJSON.Parse(R);
@@ -2168,6 +2508,7 @@ var
   J : TJSON;
   B : TJSON;
 begin
+  RequireCapability('delete light');
   Result := False;
   R := HTTPDelete(Format(BaseURL, [IP, Username]) + Format(LightURL, [AID]));
   J := TJSON.Parse(R);
@@ -2198,11 +2539,14 @@ var
   B : TJSON;
   L : THueLight;
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create('renaming a light through the integer ID overload', hav2);
   Result := False;
   L := Lights.GetLightByID(AID);
   if Assigned(L) then
   begin
-    R := HTTPPut(Format(BaseURL, [IP, Username]) + Format(LightURL, [AID]), Format('{"name": "%s"}', [L.Name]));
+    R := HTTPPut(Format(BaseURL, [IP, Username]) + Format(LightURL, [AID]),
+      Format('{"name":%s}', [Hue.JSON.THueJSON.Quote(L.Name)]));
     J := TJSON.Parse(R);
     try
       if J.IsList and (J.ListItems.Count >= 1) then
@@ -2231,8 +2575,10 @@ var
   J : TJSON;
   B : TJSON;
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create('updating a light through the integer ID overload; use ResourceID', hav2);
   Result := False;
-  R := HTTPPut(Format(BaseURL, [IP, Username]) + Format(LightURL, [AID]), AData);
+  R := HTTPPut(Format(BaseURL, [IP, Username]) + Format(LightStateURL, [AID]), AData);
   J := TJSON.Parse(R);
   try
     if J.IsList and (J.ListItems.Count >= 1) then
@@ -2254,6 +2600,138 @@ begin
   end;
 end;
 
+function THueBridge.UpdateLightState(const AResourceID, AData: string): Boolean;
+begin
+  if FAPIVersion <> hav2 then
+    raise EHueUnsupportedOperation.Create('updating a light through a v2 resource ID', hav1);
+  RebuildAPI;
+  FLastResponse := FAPI.Request(hhmPut, '/light/' + AResourceID, AData);
+  Result := True;
+end;
+
+function THueBridge.SetLightOn(const ALight: THueLight;
+  const AOn: Boolean): Boolean;
+const
+  V1Payload: array[Boolean] of string = ('{"on":false}', '{"on":true}');
+  V2Payload: array[Boolean] of string = ('{"on":{"on":false}}',
+    '{"on":{"on":true}}');
+begin
+  if not Assigned(ALight) then
+    raise EArgumentNilException.Create('ALight');
+  if FAPIVersion = hav1 then
+  begin
+    if ALight.HueIndex <= 0 then
+      raise EHueError.Create('The light has no Hue API v1 numeric ID');
+    Result := UpdateLightState(ALight.HueIndex, V1Payload[AOn])
+  end
+  else
+  begin
+    if ALight.ResourceID = '' then
+      raise EHueError.Create('The light has no Hue API v2 ResourceID');
+    Result := UpdateLightState(ALight.ResourceID, V2Payload[AOn]);
+  end;
+end;
+
+function THueBridge.SetLightBrightness(const ALight: THueLight;
+  const ABrightness: Integer): Boolean;
+var
+  Payload: System.JSON.TJSONObject;
+  Dimming: System.JSON.TJSONObject;
+begin
+  if not Assigned(ALight) then
+    raise EArgumentNilException.Create('ALight');
+  if (ABrightness < 1) or (ABrightness > 254) then
+    raise EArgumentOutOfRangeException.Create('ABrightness must be between 1 and 254');
+  if FAPIVersion = hav1 then
+  begin
+    if ALight.HueIndex <= 0 then
+      raise EHueError.Create('The light has no Hue API v1 numeric ID');
+    Exit(UpdateLightState(ALight.HueIndex,
+      Format('{"bri":%d}', [ABrightness])));
+  end;
+  if ALight.ResourceID = '' then
+    raise EHueError.Create('The light has no Hue API v2 ResourceID');
+  Payload := System.JSON.TJSONObject.Create;
+  try
+    Dimming := System.JSON.TJSONObject.Create;
+    Dimming.AddPair('brightness', System.JSON.TJSONNumber.Create(
+      Hue.API.V2.THueAPIV2.BrightnessToV2(ABrightness)));
+    Payload.AddPair('dimming', Dimming);
+    Result := UpdateLightState(ALight.ResourceID, Payload.ToJSON);
+  finally
+    Payload.Free;
+  end;
+end;
+
+function THueBridge.SetLightColorTemperature(const ALight: THueLight;
+  const AMirek: Integer): Boolean;
+var
+  Payload: System.JSON.TJSONObject;
+  ColorTemperature: System.JSON.TJSONObject;
+begin
+  if not Assigned(ALight) then
+    raise EArgumentNilException.Create('ALight');
+  if AMirek <= 0 then
+    raise EArgumentOutOfRangeException.Create('AMirek must be greater than zero');
+  if FAPIVersion = hav1 then
+  begin
+    if ALight.HueIndex <= 0 then
+      raise EHueError.Create('The light has no Hue API v1 numeric ID');
+    Exit(UpdateLightState(ALight.HueIndex, Format('{"ct":%d}', [AMirek])));
+  end;
+  if ALight.ResourceID = '' then
+    raise EHueError.Create('The light has no Hue API v2 ResourceID');
+  Payload := System.JSON.TJSONObject.Create;
+  try
+    ColorTemperature := System.JSON.TJSONObject.Create;
+    ColorTemperature.AddPair('mirek', System.JSON.TJSONNumber.Create(AMirek));
+    Payload.AddPair('color_temperature', ColorTemperature);
+    Result := UpdateLightState(ALight.ResourceID, Payload.ToJSON);
+  finally
+    Payload.Free;
+  end;
+end;
+
+function THueBridge.SetLightXY(const ALight: THueLight;
+  const AX, AY: Double): Boolean;
+var
+  Payload, Color, XY: System.JSON.TJSONObject;
+  V1XY: System.JSON.TJSONArray;
+begin
+  if not Assigned(ALight) then
+    raise EArgumentNilException.Create('ALight');
+  if (AX < 0) or (AY <= 0) or (AX > 1) or (AY > 1) or (AX + AY > 1) then
+    raise EArgumentOutOfRangeException.Create(
+      'CIE xy requires x >= 0, y > 0, and x + y <= 1');
+  Payload := System.JSON.TJSONObject.Create;
+  try
+    if FAPIVersion = hav1 then
+    begin
+      if ALight.HueIndex <= 0 then
+        raise EHueError.Create('The light has no Hue API v1 numeric ID');
+      V1XY := System.JSON.TJSONArray.Create;
+      V1XY.AddElement(System.JSON.TJSONNumber.Create(AX));
+      V1XY.AddElement(System.JSON.TJSONNumber.Create(AY));
+      Payload.AddPair('xy', V1XY);
+      Result := UpdateLightState(ALight.HueIndex, Payload.ToJSON);
+    end
+    else
+    begin
+      if ALight.ResourceID = '' then
+        raise EHueError.Create('The light has no Hue API v2 ResourceID');
+      Color := System.JSON.TJSONObject.Create;
+      XY := System.JSON.TJSONObject.Create;
+      XY.AddPair('x', System.JSON.TJSONNumber.Create(AX));
+      XY.AddPair('y', System.JSON.TJSONNumber.Create(AY));
+      Color.AddPair('xy', XY);
+      Payload.AddPair('color', Color);
+      Result := UpdateLightState(ALight.ResourceID, Payload.ToJSON);
+    end;
+  finally
+    Payload.Free;
+  end;
+end;
+
 // Groups ----------------------------------------------------------------------
 procedure THueBridge.LoadGroups;
 var
@@ -2261,7 +2739,91 @@ var
   J : TJSON;
   I : Integer;
   A : TArray<string>;
+  JV: System.JSON.TJSONValue;
+  Root, Item, Meta, Service, GroupedRoot, GroupedItem, GroupedOn,
+    GroupedDimming: System.JSON.TJSONObject;
+  Data, Services, GroupedData: System.JSON.TJSONArray;
+  GroupedJV: System.JSON.TJSONValue;
+  GroupType: THueGroupType;
+  ServiceIndex: Integer;
+  GroupedLightID: string;
+  GroupedIndex, GroupBrightness: Integer;
+  GroupAnyOn: Boolean;
 begin
+  if FAPIVersion = hav2 then
+  begin
+    FGroups.Clear;
+    GroupedJV := Hue.JSON.THueJSON.Parse(
+      HTTPGet(Format(BaseURL, [IP, Username]) + '/grouped_light'));
+    try
+      if not (GroupedJV is System.JSON.TJSONObject) then
+        raise EHueAPIError.Create('Hue v2 grouped_light response must be an object');
+      GroupedRoot := System.JSON.TJSONObject(GroupedJV);
+      GroupedData := Hue.JSON.THueJSON.ArrayValue(GroupedRoot, 'data');
+      for GroupType := gtRoom to gtZone do
+      begin
+      if GroupType = gtEntertainment then Continue;
+      if GroupType = gtRoom then R := HTTPGet(Format(BaseURL, [IP, Username]) + '/room')
+      else R := HTTPGet(Format(BaseURL, [IP, Username]) + '/zone');
+      JV := Hue.JSON.THueJSON.Parse(R);
+      try
+        if not (JV is System.JSON.TJSONObject) then
+          raise EHueAPIError.Create('Hue v2 room/zone response must be an object');
+        Root := JV as System.JSON.TJSONObject;
+        Data := Hue.JSON.THueJSON.ArrayValue(Root, 'data');
+        if Assigned(Data) then for I := 0 to Data.Count - 1 do if Data.Items[I] is System.JSON.TJSONObject then
+        begin
+          Item := System.JSON.TJSONObject(Data.Items[I]);
+          Meta := Hue.JSON.THueJSON.ObjectValue(Item, 'metadata');
+          GroupedLightID := '';
+          GroupAnyOn := False;
+          GroupBrightness := 1;
+          Services := Hue.JSON.THueJSON.ArrayValue(Item, 'services');
+          if Assigned(Services) then
+            for ServiceIndex := 0 to Services.Count - 1 do
+              if Services.Items[ServiceIndex] is System.JSON.TJSONObject then
+              begin
+                Service := System.JSON.TJSONObject(Services.Items[ServiceIndex]);
+                if SameText(Hue.JSON.THueJSON.StringValue(Service, 'rtype'),
+                  'grouped_light') then
+                begin
+                  GroupedLightID := Hue.JSON.THueJSON.StringValue(Service, 'rid');
+                  Break;
+                end;
+              end;
+          if Assigned(GroupedData) then
+            for GroupedIndex := 0 to GroupedData.Count - 1 do
+              if GroupedData.Items[GroupedIndex] is System.JSON.TJSONObject then
+              begin
+                GroupedItem := System.JSON.TJSONObject(
+                  GroupedData.Items[GroupedIndex]);
+                if SameText(Hue.JSON.THueJSON.StringValue(GroupedItem, 'id'),
+                  GroupedLightID) then
+                begin
+                  GroupedOn := Hue.JSON.THueJSON.ObjectValue(GroupedItem, 'on');
+                  GroupedDimming := Hue.JSON.THueJSON.ObjectValue(GroupedItem,
+                    'dimming');
+                  GroupAnyOn := Hue.JSON.THueJSON.BooleanValue(GroupedOn, 'on');
+                  if Assigned(GroupedDimming) then
+                    GroupBrightness := Hue.API.V2.THueAPIV2.BrightnessFromV2(
+                      Hue.JSON.THueJSON.NumberValue(GroupedDimming,
+                        'brightness'));
+                  Break;
+                end;
+              end;
+          FGroups.Add.LoadGroupV2(Hue.JSON.THueJSON.StringValue(Item, 'id'),
+            GroupedLightID,
+            Hue.JSON.THueJSON.StringValue(Meta, 'name'), GroupType,
+            GroupAnyOn, False, GroupBrightness);
+        end;
+      finally JV.Free; end;
+      end;
+    finally
+      GroupedJV.Free;
+    end;
+    if Assigned(FOnGroupsLoaded) then FOnGroupsLoaded(Self);
+    Exit;
+  end;
   R := HTTPGet(Format(BaseURL, [IP, Username]) + GroupsURL);
   J := TJSON.Parse(R);
   try
@@ -2283,6 +2845,7 @@ var
   I : Integer;
   G : THueGroup;
 begin
+  if FAPIVersion = hav2 then begin LoadGroups; if Assigned(FOnGroupsUpdated) then FOnGroupsUpdated(Self); Exit; end;
   R := HTTPGet(Format(BaseURL, [IP, Username]) + GroupsURL);
   J := TJSON.Parse(R);
   try
@@ -2313,6 +2876,7 @@ var
   J : TJSON;
   B : TJSON;
 begin
+  RequireCapability('create group');
   Result := False;
   if (GroupType = gtRoom) then
     R := HTTPPost(Format(BaseURL, [IP, Username]) + GroupsURL, Format(BodyA, [AName, SGT[GroupType], SCL[GroupClass], GetLightsJSON(Alights)]))
@@ -2337,6 +2901,7 @@ var
   J : TJSON;
   B : TJSON;
 begin
+  if FAPIVersion = hav2 then raise EHueUnsupportedOperation.Create('deleting a group through an integer ID', hav2);
   Result := False;
   R := HTTPDelete(Format(BaseURL, [IP, Username]) + Format(GroupURL, [AID]));
   J := TJSON.Parse(R);
@@ -2368,6 +2933,7 @@ var
   S : string;
   G : THueGroup;
 begin
+  if FAPIVersion = hav2 then raise EHueUnsupportedOperation.Create('updating a group through an integer ID', hav2);
   Result := False;
   G := Groups.GetGroupByID(AID);
   if Assigned(G) then
@@ -2403,11 +2969,12 @@ var
   B : TJSON;
   G : THueGroup;
 begin
+  if FAPIVersion = hav2 then raise EHueUnsupportedOperation.Create('updating a grouped light through an integer ID', hav2);
   Result := False;
   G := Groups.GetGroupByID(AID);
   if Assigned(G) then
   begin
-    R := HTTPPut(Format(BaseURL, [IP, Username]) + Format(GroupURL, [AID]), AData);
+    R := HTTPPut(Format(BaseURL, [IP, Username]) + Format(GroupStateURL, [AID]), AData);
     J := TJSON.Parse(R);
     try
       if J.IsList and (J.ListItems.Count >= 1) then
@@ -2430,6 +2997,77 @@ begin
   end;
 end;
 
+function THueBridge.UpdateGroupAction(const AResourceID, AData: string): Boolean;
+begin
+  if FAPIVersion <> hav2 then
+    raise EHueUnsupportedOperation.Create('updating a grouped_light through a v2 resource ID', hav1);
+  RebuildAPI;
+  FLastResponse := FAPI.Request(hhmPut, '/grouped_light/' + AResourceID, AData);
+  Result := True;
+end;
+
+function THueBridge.SetGroupOn(const AGroup: THueGroup;
+  const AOn: Boolean): Boolean;
+const
+  V1Payload: array[Boolean] of string = ('{"on":false}', '{"on":true}');
+  V2Payload: array[Boolean] of string = ('{"on":{"on":false}}',
+    '{"on":{"on":true}}');
+begin
+  if not Assigned(AGroup) then
+    raise EArgumentNilException.Create('AGroup');
+  if FAPIVersion = hav1 then
+  begin
+    if AGroup.HueIndex < 0 then
+      raise EHueError.Create('The group has no Hue API v1 numeric ID');
+    Result := UpdateGroupAction(AGroup.HueIndex, V1Payload[AOn])
+  end
+  else
+  begin
+    if AGroup.GroupedLightResourceID = '' then
+      raise EHueError.Create('The group has no Hue API v2 grouped_light ResourceID');
+    Result := UpdateGroupAction(AGroup.GroupedLightResourceID, V2Payload[AOn]);
+  end;
+end;
+
+function THueBridge.SetGroupXY(const AGroup: THueGroup;
+  const AX, AY: Double): Boolean;
+var
+  Payload, Color, XY: System.JSON.TJSONObject;
+  V1XY: System.JSON.TJSONArray;
+begin
+  if not Assigned(AGroup) then
+    raise EArgumentNilException.Create('AGroup');
+  if (AX < 0) or (AY <= 0) or (AX > 1) or (AY > 1) or (AX + AY > 1) then
+    raise EArgumentOutOfRangeException.Create(
+      'CIE xy requires x >= 0, y > 0, and x + y <= 1');
+  Payload := System.JSON.TJSONObject.Create;
+  try
+    if FAPIVersion = hav1 then
+    begin
+      V1XY := System.JSON.TJSONArray.Create;
+      V1XY.AddElement(System.JSON.TJSONNumber.Create(AX));
+      V1XY.AddElement(System.JSON.TJSONNumber.Create(AY));
+      Payload.AddPair('xy', V1XY);
+      Result := UpdateGroupAction(AGroup.HueIndex, Payload.ToJSON);
+    end
+    else
+    begin
+      if AGroup.GroupedLightResourceID = '' then
+        raise EHueError.Create('The group has no Hue API v2 grouped_light ResourceID');
+      Color := System.JSON.TJSONObject.Create;
+      XY := System.JSON.TJSONObject.Create;
+      XY.AddPair('x', System.JSON.TJSONNumber.Create(AX));
+      XY.AddPair('y', System.JSON.TJSONNumber.Create(AY));
+      Color.AddPair('xy', XY);
+      Payload.AddPair('color', Color);
+      Result := UpdateGroupAction(AGroup.GroupedLightResourceID,
+        Payload.ToJSON);
+    end;
+  finally
+    Payload.Free;
+  end;
+end;
+
 // Schedules -------------------------------------------------------------------
 procedure THueBridge.LoadSchedules;
 var
@@ -2438,6 +3076,7 @@ var
   I : Integer;
   A : TArray<string>;
 begin
+  RequireCapability('schedules');
   R := HTTPGet(Format(BaseURL, [IP, Username]) + SchedulesURL);
   J := TJSON.Parse(R, True);
   try
@@ -2458,6 +3097,7 @@ var
   J : TJSON;
   I : Integer;
 begin
+  RequireCapability('schedules');
   R := HTTPGet(Format(BaseURL, [IP, Username]) + SchedulesURL);
   J := TJSON.Parse(R, True);
   try
@@ -2489,6 +3129,7 @@ var
   J : TJSON;
   B : TJSON;
 begin
+  RequireCapability('schedules');
   Result := False;
   R := HTTPPost(Format(BaseURL, [IP, Username]) + SchedulesURL, Format(Body, [
     AName, ADescription, AAddress, SMethod[AMethod], ABody, ALocalTime,
@@ -2513,6 +3154,7 @@ var
   J : TJSON;
   B : TJSON;
 begin
+  RequireCapability('schedules');
   Result := False;
   R := HTTPDelete(Format(BaseURL, [IP, Username]) + Format(ScheduleURL, [AID]));
   J := TJSON.Parse(R);
@@ -2545,6 +3187,7 @@ const
 var
   S : THueSchedule;
 begin
+  RequireCapability('schedules');
   Result := False;
   S := Schedules.GetScheduleByID(AID);
   if Assigned(S) then
@@ -2561,6 +3204,7 @@ var
   B : TJSON;
   S : THueSchedule;
 begin
+  RequireCapability('schedules');
   Result := False;
   S := Schedules.GetScheduleByID(AID);
   if Assigned(S) then
@@ -2595,8 +3239,33 @@ var
   J : TJSON;
   I : Integer;
   A : TArray<string>;
+  JV: System.JSON.TJSONValue;
+  Root, Item, Meta, GroupRef: System.JSON.TJSONObject;
+  Data: System.JSON.TJSONArray;
 begin
   R := HTTPGet(Format(BaseURL, [IP, Username]) + ScenesURL);
+  if FAPIVersion = hav2 then
+  begin
+    JV := Hue.JSON.THueJSON.Parse(R);
+    try
+      if not (JV is System.JSON.TJSONObject) then
+        raise EHueAPIError.Create('Hue v2 scene response must be an object');
+      Root := JV as System.JSON.TJSONObject;
+      Data := Hue.JSON.THueJSON.ArrayValue(Root, 'data');
+      FScenes.Clear;
+      if Assigned(Data) then for I := 0 to Data.Count - 1 do if Data.Items[I] is System.JSON.TJSONObject then
+      begin
+        Item := System.JSON.TJSONObject(Data.Items[I]);
+        Meta := Hue.JSON.THueJSON.ObjectValue(Item, 'metadata');
+        GroupRef := Hue.JSON.THueJSON.ObjectValue(Item, 'group');
+        FScenes.Add.LoadSceneV2(Hue.JSON.THueJSON.StringValue(Item, 'id'),
+          Hue.JSON.THueJSON.StringValue(Meta, 'name'),
+          Hue.JSON.THueJSON.StringValue(GroupRef, 'rid'));
+      end;
+    finally JV.Free; end;
+    if Assigned(FOnScenesLoaded) then FOnScenesLoaded(Self);
+    Exit;
+  end;
   J := TJSON.Parse(R, True);
   try
     FScenes.Clear;
@@ -2615,6 +3284,8 @@ var
   J : TJSON;
   B : TJSON;
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create('recalling a scene through a numeric group ID', hav2);
   Result := False;
   R := HTTPPUT(Format(BaseURL, [IP, Username]) + Format(GroupStateURL, [AGroup]), Format('{"scene":"%s"}', [AScene]));
   J := TJSON.Parse(R);
@@ -2635,6 +3306,30 @@ begin
     end;
   finally
     J.Free;
+  end;
+end;
+
+function THueBridge.RecallScene(const ASceneResourceID: string): Boolean;
+begin
+  if FAPIVersion <> hav2 then
+    raise EHueUnsupportedOperation.Create('recalling a scene through a v2 resource ID', hav1);
+  RebuildAPI;
+  FLastResponse := FAPI.Request(hhmPut, '/scene/' + ASceneResourceID,
+    '{"recall":{"action":"active"}}');
+  Result := True;
+end;
+
+function THueBridge.RecallScene(const AScene: THueScene): Boolean;
+begin
+  if not Assigned(AScene) then
+    raise EArgumentNilException.Create('AScene');
+  if FAPIVersion = hav1 then
+    Result := RecallScene(AScene.Group, AScene.HueIndex)
+  else
+  begin
+    if AScene.ResourceID = '' then
+      raise EHueError.Create('The scene has no Hue API v2 ResourceID');
+    Result := RecallScene(AScene.ResourceID);
   end;
 end;
 

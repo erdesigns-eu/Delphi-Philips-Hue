@@ -1,0 +1,24 @@
+package HueRuntime;
+
+{$R *.res}
+{$ALIGN 8}
+{$ASSERTIONS ON}
+{$DESCRIPTION 'Delphi Philips Hue runtime'}
+{$IMPLICITBUILD OFF}
+
+requires
+  rtl,
+  vcl;
+
+contains
+  Hue.Types in '..\Hue.Types.pas',
+  Hue.Errors in '..\Hue.Errors.pas',
+  Hue.JSON in '..\Hue.JSON.pas',
+  Hue.Transport in '..\Hue.Transport.pas',
+  Hue.API in '..\Hue.API.pas',
+  Hue.API.V1 in '..\Hue.API.V1.pas',
+  Hue.API.V2 in '..\Hue.API.V2.pas',
+  Hue.EventStream in '..\Hue.EventStream.pas',
+  Hue.Bridge in '..\Hue.Bridge.pas';
+
+end.
