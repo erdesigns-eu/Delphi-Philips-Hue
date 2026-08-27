@@ -93,7 +93,7 @@ class procedure THueJSON.RaiseIfHueError(const AText: string);
 var
   V: TJSONValue;
   A: TJSONArray;
-  O, E: TJSONObject;
+  E: TJSONObject;
   Description: string;
 begin
   V := Parse(AText);

@@ -16,6 +16,8 @@ type
     /// <summary>Captures a request and returns an empty successful Hue envelope.</summary>
     function Execute(const AMethod: THueHTTPMethod; const AURL, ABody: string;
       const AHeaders: THueHeaders): string;
+    /// <summary>Accepts the component User-Agent value for interface compatibility.</summary>
+    procedure SetUserAgent(const AValue: string);
   end;
 
   [TestFixture]
@@ -49,6 +51,11 @@ begin
   LastURL := AURL;
   HasApplicationKey := AHeaders.ContainsKey('hue-application-key');
   Result := '{"errors":[],"data":[]}';
+end;
+
+procedure THueMockTransport.SetUserAgent(const AValue: string);
+begin
+  { The test double does not issue network requests. }
 end;
 
 procedure THueCoreTests.V1URLAndAuthentication;

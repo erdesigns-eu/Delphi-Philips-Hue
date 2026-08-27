@@ -180,6 +180,7 @@ type
     FType: THueGroupType;
     FState: THueGroupState;
     FResourceID: string;
+    FGroupedLightResourceID: string;
 
     FOnChange: THueGroupChangeEvent;
     FOnIdentify: THueGroupIdentifyEvent;
@@ -197,8 +198,8 @@ type
 
     procedure LoadGroup(AIndex: Integer; AGroup: TJSON);
     /// <summary>Loads a v2 room, zone, or grouped-light compatibility view.</summary>
-    procedure LoadGroupV2(const AResourceID, AName: string; const AType: THueGroupType;
-      const AAnyOn, AAllOn: Boolean);
+    procedure LoadGroupV2(const AResourceID, AGroupedLightResourceID, AName: string;
+      const AType: THueGroupType; const AAnyOn, AAllOn: Boolean);
     procedure Assign(Source: TPersistent); override;
     procedure Identify;
   published
@@ -212,6 +213,8 @@ type
     property State: THueGroupState read FState;
     /// <summary>Gets the Hue API v2 UUID, or an empty string for a v1 group.</summary>
     property ResourceID: string read FResourceID;
+    /// <summary>Gets the v2 grouped_light service UUID used to control this room or zone.</summary>
+    property GroupedLightResourceID: string read FGroupedLightResourceID;
 
     property OnChange: THueGroupChangeEvent read FOnChange write FOnChange;
     property OnIdentify: THueGroupIdentifyEvent read FOnIdentify write FOnIdentify;
@@ -763,7 +766,7 @@ begin
   if AEffect <> Effect then
   begin
     FEffect := AEffect;
-    UpdateState(Format('{"effect": %s}', [SEffect[Effect]]));
+    UpdateState(Format('{"effect":"%s"}', [SEffect[Effect]]));
   end;
 end;
 
@@ -851,6 +854,7 @@ var
   AState            : TJSON;
 begin
   FHueIndex := AIndex;
+  FResourceID := '';
   if ALight.Items.ContainsKey('manufacturername') then
     FManufacturerName := ALight.Items.Items['manufacturername'].AsString;
   if ALight.Items.ContainsKey('modelid') then
@@ -868,6 +872,16 @@ begin
   if ALight.Items.ContainsKey('state') then
   begin
     AState := ALight.Items.Items['state'];
+    AAlert := saNone;
+    ABrightness := 1;
+    AColorMode := cmNone;
+    AColorTemperature := 0;
+    AEffect := seNone;
+    AHue := 0;
+    AMode := '';
+    AON := False;
+    AReachable := False;
+    ASaturation := 0;
     // Alert
     if AState.Items.ContainsKey('alert') then
     begin
@@ -902,7 +916,7 @@ begin
     // Effect
     if AState.Items.ContainsKey('effect') then
     begin
-      if (AState.Items.Items['colormode'].AsString = 'colorloop') then
+      if (AState.Items.Items['effect'].AsString = 'colorloop') then
         AEffect := seColorLoop
       else
         AEffect := seNone;
@@ -941,7 +955,6 @@ end;
 
 procedure THueLight.Assign(Source: TPersistent);
 begin
-  inherited;
   if Source is THueLight then
   begin
     FHueIndex         := THueLight(Source).HueIndex;
@@ -952,8 +965,11 @@ begin
     FProductName      := THueLight(Source).ProductName;
     FLightType        := THueLight(Source).LightType;
     FUniqueID         := THueLight(Source).UniqueID;
+    FResourceID       := THueLight(Source).ResourceID;
     THueLight(Source).State.AssignTo(State);
-  end;
+  end
+  else
+    inherited;
 end;
 
 procedure THueLight.Identify;
@@ -1155,6 +1171,8 @@ var
   I                 : Integer;
 begin
   FHueIndex := AIndex;
+  FResourceID := '';
+  FGroupedLightResourceID := '';
   // Class
   if AGroup.Items.ContainsKey('class') then
     FClass := GetGroupClassFromString(AGroup.Items.Items['class'].AsString)
@@ -1206,6 +1224,16 @@ begin
   if AGroup.Items.ContainsKey('action') then
   begin
     AAction := AGroup.Items.Items['action'];
+    AAlert := saNone;
+    ABrightness := 1;
+    AColorMode := cmNone;
+    AColorTemperature := 0;
+    AEffect := seNone;
+    AHue := 0;
+    AMode := '';
+    AON := False;
+    AReachable := False;
+    ASaturation := 0;
     // Alert
     if AAction.Items.ContainsKey('alert') then
     begin
@@ -1240,7 +1268,7 @@ begin
     // Effect
     if AAction.Items.ContainsKey('effect') then
     begin
-      if (AAction.Items.Items['colormode'].AsString = 'colorloop') then
+      if (AAction.Items.Items['effect'].AsString = 'colorloop') then
         AEffect := seColorLoop
       else
         AEffect := seNone;
@@ -1264,11 +1292,12 @@ begin
   end;
 end;
 
-procedure THueGroup.LoadGroupV2(const AResourceID, AName: string;
-  const AType: THueGroupType; const AAnyOn, AAllOn: Boolean);
+procedure THueGroup.LoadGroupV2(const AResourceID, AGroupedLightResourceID,
+  AName: string; const AType: THueGroupType; const AAnyOn, AAllOn: Boolean);
 begin
   FHueIndex := 0;
   FResourceID := AResourceID;
+  FGroupedLightResourceID := AGroupedLightResourceID;
   FName := AName;
   FType := AType;
   if AAllOn then FState := gsAllOn else if AAnyOn then FState := gsAnyOn else FState := gsAllOff;
@@ -1277,18 +1306,21 @@ end;
 
 procedure THueGroup.Assign(Source: TPersistent);
 begin
-  inherited;
   if Source is THueGroup then
   begin
     FHueIndex := THueGroup(Source).HueIndex;
     FClass    := THueGroup(Source).GroupClass;
-    FLights   := THueGroup(Source).Lights;
+    FLights   := Copy(THueGroup(Source).Lights, 0, Length(THueGroup(Source).Lights));
     FName     := THueGroup(Source).Name;
-    FSensors  := THueGroup(Source).Sensors;
+    FSensors  := Copy(THueGroup(Source).Sensors, 0, Length(THueGroup(Source).Sensors));
     FType     := THueGroup(Source).GroupType;
     FState    := THueGroup(Source).State;
+    FResourceID := THueGroup(Source).ResourceID;
+    FGroupedLightResourceID := THueGroup(Source).GroupedLightResourceID;
     THueGroup(Source).Action.AssignTo(Action);
-  end;
+  end
+  else
+    inherited;
 end;
 
 procedure THueGroup.Identify;
@@ -1372,7 +1404,7 @@ procedure THueScheduleCommand.AssignTo(Dest: TPersistent);
 begin
   if Dest is THueScheduleCommand then
   begin
-    with THueLightState(Dest) do
+    with THueScheduleCommand(Dest) do
     begin
       FAddress := Self.Address;
       FBody    := Self.Body;
@@ -1438,7 +1470,6 @@ end;
 
 procedure THueSchedule.Assign(Source: TPersistent);
 begin
-  inherited;
   if Source is THueSchedule then
   begin
     FHueIndex    := THueSchedule(Source).HueIndex;
@@ -1451,7 +1482,9 @@ begin
     FAutoDelete  := THueSchedule(Source).AutoDelete;
     FRecycle     := THueSchedule(Source).Recycle;
     THueSchedule(Source).Command.AssignTo(FCommand);
-  end;
+  end
+  else
+    inherited;
 end;
 
 procedure THueSchedule.SetName(const AName: string);
@@ -1622,7 +1655,6 @@ end;
 
 procedure THueScene.Assign(Source: TPersistent);
 begin
-  inherited;
   if Source is THueScene then
   begin
     FHueIndex := THueScene(Source).HueIndex;
@@ -1630,7 +1662,11 @@ begin
     FGroup    := THueScene(Source).Group;
     FPicture  := THueScene(Source).Picture;
     FOwner    := THueScene(Source).Owner;
-  end;
+    FResourceID := THueScene(Source).ResourceID;
+    FLights := Copy(THueScene(Source).Lights, 0, Length(THueScene(Source).Lights));
+  end
+  else
+    inherited;
 end;
 
 procedure THueScene.LoadScene(AIndex: string; AScene: TJSON);
@@ -1638,6 +1674,7 @@ var
   I : Integer;
 begin
   FHueIndex := AIndex;
+  FResourceID := AIndex;
   if AScene.Items.ContainsKey('group') then
     FGroup := AScene.Items.Items['group'].AsInteger;
   if AScene.Items.ContainsKey('name') then
@@ -1733,6 +1770,7 @@ begin
       FSWVersion        := Self.SWVersion;
       FTimezone         := Self.TimeZone;
       FZigbeeChannel    := Self.ZigbeeChannel;
+      FResourceID       := Self.ResourceID;
     end
   end
   else
@@ -1959,6 +1997,7 @@ begin
   FSchedules.Free;
   FScenes.Free;
   FConfiguration.Free;
+  FNetwork.Free;
   inherited Destroy;
 end;
 
@@ -1995,6 +2034,8 @@ end;
 procedure THueBridge.SetUseragent(const AUseragent: string);
 begin
   FUseragent := AUseragent;
+  if Assigned(FTransport) then
+    FTransport.SetUserAgent(AUseragent);
 end;
 
 procedure THueBridgeConfiguration.LoadV2(const AResourceID, ABridgeID,
@@ -2020,6 +2061,7 @@ begin
   if not Assigned(ATransport) then
     raise EArgumentNilException.Create('ATransport');
   FTransport := ATransport;
+  FTransport.SetUserAgent(FUseragent);
   RebuildAPI;
 end;
 
@@ -2052,34 +2094,47 @@ end;
 
 procedure THueBridge.UpdateLightChange(Sender: TObject; URL: string; PUTData: string);
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create(
+      'model property updates in v2; use UpdateLightState(ResourceID, native v2 JSON)', hav2);
   if FUpdateOnLightChange then
     FLastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + URL, PUTData);
 end;
 
 procedure THueBridge.UpdateGroupChange(Sender: TObject; URL: string; PUTData: string);
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create(
+      'model property updates in v2; use UpdateGroupAction(grouped_light ResourceID, native v2 JSON)', hav2);
   if FUpdateOnGroupChange then
     FLastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + URL, PUTData);
 end;
 
 procedure THueBridge.UpdateScheduleChange(Sender: TObject; URL: string; PUTData: string);
 begin
+  RequireCapability('schedules');
   if FUpdateOnScheduleChange then
     FLastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + URL, PUTData);
 end;
 
 procedure THueBridge.UpdateConfiguration(Sender: TObject; URL: string; PUTData: string);
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create('legacy configuration property updates', hav2);
   FlastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + URL, PUTData);
 end;
 
 procedure THueBridge.IdentifyLight(Sender: TObject; ID: Integer);
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create('identifying a light through a numeric ID', hav2);
   FlastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + Format(LightStateURL, [ID]), '{"alert":"select"}');
 end;
 
 procedure THueBridge.IdentifyGroup(Sender: TObject; ID: Integer);
 begin
+  if FAPIVersion = hav2 then
+    raise EHueUnsupportedOperation.Create('identifying a group through a numeric ID', hav2);
   FlastResponse := HTTPPut(Format(BaseURL, [IP, Username]) + Format(GroupStateURL, [ID]), '{"alert":"select"}');
 end;
 
@@ -2126,7 +2181,7 @@ begin
   FLastResponse := R;
   J := TJSON.Parse(R);
   try
-    if J.IsList and (J.ListItems.Count >= 1) and (J.ListItems.Count >= ABridge) then
+    if J.IsList and (ABridge >= 0) and (ABridge < J.ListItems.Count) then
     begin
       B := J.ListItems[ABridge];
       if B.Items.ContainsKey('internalipaddress') then
@@ -2148,7 +2203,8 @@ var
   B : TJSON;
 begin
   Result := False;
-  R := HTTPPost(Format(BridgePairURL, [IP]), Format('{"devicetype":"%s"}', [AName]));
+  R := HTTPPost(Format(BridgePairURL, [IP]),
+    Format('{"devicetype":%s}', [Hue.JSON.THueJSON.Quote(AName)]));
   FLastResponse := R;
   J := TJSON.Parse(R);
   try
@@ -2187,6 +2243,8 @@ begin
     R := HTTPGet(Format(BaseURL, [IP, Username]) + '/bridge');
     JV := Hue.JSON.THueJSON.Parse(R);
     try
+      if not (JV is System.JSON.TJSONObject) then
+        raise EHueAPIError.Create('Hue v2 bridge response must be an object');
       Root := JV as System.JSON.TJSONObject;
       Data := Hue.JSON.THueJSON.ArrayValue(Root, 'data');
       if Assigned(Data) and (Data.Count > 0) and (Data.Items[0] is System.JSON.TJSONObject) then
@@ -2369,7 +2427,8 @@ begin
   L := Lights.GetLightByID(AID);
   if Assigned(L) then
   begin
-    R := HTTPPut(Format(BaseURL, [IP, Username]) + Format(LightURL, [AID]), Format('{"name": "%s"}', [L.Name]));
+    R := HTTPPut(Format(BaseURL, [IP, Username]) + Format(LightURL, [AID]),
+      Format('{"name":%s}', [Hue.JSON.THueJSON.Quote(L.Name)]));
     J := TJSON.Parse(R);
     try
       if J.IsList and (J.ListItems.Count >= 1) then
@@ -2440,9 +2499,11 @@ var
   I : Integer;
   A : TArray<string>;
   JV: System.JSON.TJSONValue;
-  Root, Item, Meta: System.JSON.TJSONObject;
-  Data: System.JSON.TJSONArray;
+  Root, Item, Meta, Service: System.JSON.TJSONObject;
+  Data, Services: System.JSON.TJSONArray;
   GroupType: THueGroupType;
+  ServiceIndex: Integer;
+  GroupedLightID: string;
 begin
   if FAPIVersion = hav2 then
   begin
@@ -2454,13 +2515,30 @@ begin
       else R := HTTPGet(Format(BaseURL, [IP, Username]) + '/zone');
       JV := Hue.JSON.THueJSON.Parse(R);
       try
+        if not (JV is System.JSON.TJSONObject) then
+          raise EHueAPIError.Create('Hue v2 room/zone response must be an object');
         Root := JV as System.JSON.TJSONObject;
         Data := Hue.JSON.THueJSON.ArrayValue(Root, 'data');
         if Assigned(Data) then for I := 0 to Data.Count - 1 do if Data.Items[I] is System.JSON.TJSONObject then
         begin
           Item := System.JSON.TJSONObject(Data.Items[I]);
           Meta := Hue.JSON.THueJSON.ObjectValue(Item, 'metadata');
+          GroupedLightID := '';
+          Services := Hue.JSON.THueJSON.ArrayValue(Item, 'services');
+          if Assigned(Services) then
+            for ServiceIndex := 0 to Services.Count - 1 do
+              if Services.Items[ServiceIndex] is System.JSON.TJSONObject then
+              begin
+                Service := System.JSON.TJSONObject(Services.Items[ServiceIndex]);
+                if SameText(Hue.JSON.THueJSON.StringValue(Service, 'rtype'),
+                  'grouped_light') then
+                begin
+                  GroupedLightID := Hue.JSON.THueJSON.StringValue(Service, 'rid');
+                  Break;
+                end;
+              end;
           FGroups.Add.LoadGroupV2(Hue.JSON.THueJSON.StringValue(Item, 'id'),
+            GroupedLightID,
             Hue.JSON.THueJSON.StringValue(Meta, 'name'), GroupType, False, False);
         end;
       finally JV.Free; end;
@@ -2830,6 +2908,8 @@ begin
   begin
     JV := Hue.JSON.THueJSON.Parse(R);
     try
+      if not (JV is System.JSON.TJSONObject) then
+        raise EHueAPIError.Create('Hue v2 scene response must be an object');
       Root := JV as System.JSON.TJSONObject;
       Data := Hue.JSON.THueJSON.ArrayValue(Root, 'data');
       FScenes.Clear;

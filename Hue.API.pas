@@ -44,12 +44,14 @@ type
 
 implementation
 
-uses Hue.Errors, Hue.JSON;
+uses System.SysUtils, Hue.Errors, Hue.JSON;
 
 constructor THueAPIBase.Create(const ABridgeHost, AApplicationKey: string;
   const ATransport: IHueTransport);
 begin
   inherited Create;
+  if not Assigned(ATransport) then
+    raise EArgumentNilException.Create('ATransport');
   FBridgeHost := ABridgeHost;
   FApplicationKey := AApplicationKey;
   FTransport := ATransport;
@@ -69,7 +71,8 @@ begin
   H := CreateHeaders;
   try
     Result := FTransport.Execute(AMethod, BuildURL(APath), ABody, H);
-    THueJSON.RaiseIfHueError(Result);
+    if Result <> '' then
+      THueJSON.RaiseIfHueError(Result);
   finally
     H.Free;
   end;

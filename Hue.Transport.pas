@@ -16,6 +16,8 @@ type
     /// <summary>Sends a UTF-8 request and returns its UTF-8 response body.</summary>
     function Execute(const AMethod: THueHTTPMethod; const AURL, ABody: string;
       const AHeaders: THueHeaders): string;
+    /// <summary>Sets the User-Agent value sent with subsequent requests.</summary>
+    procedure SetUserAgent(const AValue: string);
   end;
 
   /// <summary>System.Net.HttpClient transport with platform TLS validation.</summary>
@@ -24,6 +26,8 @@ type
     FClient: THTTPClient;
     FConnectionTimeout: Integer;
     FResponseTimeout: Integer;
+    FUserAgent: string;
+    /// <summary>Applies the current timeout and user-agent settings to the HTTP client.</summary>
     procedure ConfigureClient;
   public
     /// <summary>Creates a transport using secure platform certificate validation.</summary>
@@ -33,6 +37,8 @@ type
     /// <summary>Sends a UTF-8 request and raises EHueHTTPError for non-success status codes.</summary>
     function Execute(const AMethod: THueHTTPMethod; const AURL, ABody: string;
       const AHeaders: THueHeaders): string;
+    /// <summary>Sets the User-Agent value sent with subsequent requests.</summary>
+    procedure SetUserAgent(const AValue: string);
     /// <summary>Gets or sets the connection timeout in milliseconds.</summary>
     property ConnectionTimeout: Integer read FConnectionTimeout write FConnectionTimeout;
     /// <summary>Gets or sets the response timeout in milliseconds.</summary>
@@ -50,6 +56,7 @@ begin
   FClient := THTTPClient.Create;
   FConnectionTimeout := 5000;
   FResponseTimeout := 15000;
+  FUserAgent := 'Delphi-Philips-Hue/2';
 end;
 
 destructor THueHTTPTransport.Destroy;
@@ -62,7 +69,12 @@ procedure THueHTTPTransport.ConfigureClient;
 begin
   FClient.ConnectionTimeout := FConnectionTimeout;
   FClient.ResponseTimeout := FResponseTimeout;
-  FClient.UserAgent := 'Delphi-Philips-Hue/2';
+  FClient.UserAgent := FUserAgent;
+end;
+
+procedure THueHTTPTransport.SetUserAgent(const AValue: string);
+begin
+  FUserAgent := AValue;
 end;
 
 function THueHTTPTransport.Execute(const AMethod: THueHTTPMethod;

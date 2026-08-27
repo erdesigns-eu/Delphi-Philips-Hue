@@ -80,8 +80,14 @@ Hue v2 models devices, services, rooms, zones, `grouped_light`, scenes, and sens
 
 - Existing `HueIndex: Integer` remains intact for v1.
 - `THueLight.ResourceID`, `THueGroup.ResourceID`, `THueScene.ResourceID`, and `Configuration.ResourceID` carry v2 UUIDs.
+- `THueGroup.GroupedLightResourceID` carries the `grouped_light` service UUID needed by the v2 group-control overload.
 - A v2-only object has `HueIndex = 0`; zero is **not** a fabricated mapping.
 - UUID overloads accept native v2 request JSON. This makes behavior explicit where v1 and v2 color/state semantics differ.
+
+The legacy writable model properties still emit v1-shaped payloads. Under `hav2` they now raise
+`EHueUnsupportedOperation` rather than sending an invalid request; use the documented UUID overloads
+with native v2 JSON. Room/zone compatibility views currently report membership and identity, but their
+aggregate on/off state is not populated until a separate `grouped_light` resource is requested.
 
 ## Unit structure
 
