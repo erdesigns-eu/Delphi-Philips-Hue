@@ -17,10 +17,7 @@ begin
     Hue.APIVersion := hav2; // Omit this line, or use hav1, for legacy behavior.
     Hue.LoadLights;
     if Hue.Lights.Count > 0 then
-      if Hue.APIVersion = hav2 then
-        Hue.UpdateLightState(Hue.Lights[0].ResourceID, '{"on":{"on":true}}')
-      else
-        Hue.UpdateLightState(Hue.Lights[0].HueIndex, '{"on":true}');
+      Hue.SetLightOn(Hue.Lights[0], True);
     Writeln(Format('Loaded %d lights.', [Hue.Lights.Count]));
   finally
     Hue.Free;

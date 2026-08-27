@@ -39,10 +39,20 @@ To use v2, change only the selection and use UUID overloads when addressing a re
 ```pascal
 Hue.APIVersion := hav2;
 Hue.LoadLights;
-Hue.UpdateLightState(Hue.Lights[0].ResourceID, '{"on":{"on":true}}');
+Hue.SetLightOn(Hue.Lights[0], True);
+Hue.SetLightBrightness(Hue.Lights[0], 127);
+Hue.SetLightColorTemperature(Hue.Lights[0], 250);
 ```
 
-`examples/ConsoleHueDemo.dpr` provides a complete minimal example. It reads the key from `HUE_APPLICATION_KEY`; no credentials are committed.
+The same `SetLightOn`, `SetLightBrightness`, `SetLightColorTemperature`, and `SetGroupOn`
+calls work under `hav1` and `hav2`; the component chooses numeric IDs/v1 payloads or UUIDs/v2
+payloads internally. `RecallScene(THueScene)` provides the equivalent version-neutral scene operation.
+Raw `UpdateLightState` and `UpdateGroupAction` overloads remain available
+for native API features not represented by these convenience methods.
+
+`examples/ConsoleHueDemo.dpr` provides a minimal example. `examples/VersionNeutralControl.dpr`
+demonstrates version-neutral light/group control and resource lookup. Both read configuration from
+environment variables, and no credentials are committed.
 
 ## Pairing
 
@@ -83,6 +93,8 @@ Hue v2 models devices, services, rooms, zones, `grouped_light`, scenes, and sens
 - `THueGroup.GroupedLightResourceID` carries the `grouped_light` service UUID needed by the v2 group-control overload.
 - A v2-only object has `HueIndex = 0`; zero is **not** a fabricated mapping.
 - UUID overloads accept native v2 request JSON. This makes behavior explicit where v1 and v2 color/state semantics differ.
+- Collections provide `GetLightByResourceID`, `GetGroupByResourceID`,
+  `GetGroupByGroupedLightResourceID`, and `GetSceneByResourceID` lookups for v2 callers.
 
 The legacy writable model properties still emit v1-shaped payloads. Under `hav2` they now raise
 `EHueUnsupportedOperation` rather than sending an invalid request; use the documented UUID overloads

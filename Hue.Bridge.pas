@@ -143,6 +143,8 @@ type
     constructor Create(AOwner: TPersistent);
     function Add: THueLight;
     function GetLightByID(const AID: Integer) : THueLight;
+    /// <summary>Finds a light by its Hue API v2 UUID, or returns nil when it is absent.</summary>
+    function GetLightByResourceID(const AResourceID: string): THueLight;
 
     property Items[Index: Integer]: THueLight read GetItem write SetItem;
     property OnLightChanged: THueUpdateLightEvent read FOnLightChange write FOnLightChange;
@@ -235,6 +237,10 @@ type
     constructor Create(AOwner: TPersistent);
     function Add: THueGroup;
     function GetGroupByID(const AID: Integer) : THueGroup;
+    /// <summary>Finds a room or zone by its Hue API v2 UUID, or returns nil when it is absent.</summary>
+    function GetGroupByResourceID(const AResourceID: string): THueGroup;
+    /// <summary>Finds a room or zone by its grouped_light service UUID, or returns nil when it is absent.</summary>
+    function GetGroupByGroupedLightResourceID(const AResourceID: string): THueGroup;
 
     property Items[Index: Integer]: THueGroup read GetItem write SetItem;
     property OnGroupChanged: THueUpdateGroupEvent read FOnGroupChange write FOnGroupChange;
@@ -377,6 +383,8 @@ type
     constructor Create(AOwner: TPersistent);
     function Add: THueScene;
     function GetSceneByID(const AID: string) : THueScene;
+    /// <summary>Finds a scene by its Hue API v2 UUID, or returns nil when it is absent.</summary>
+    function GetSceneByResourceID(const AResourceID: string): THueScene;
 
     property Items[Index: Integer]: THueScene read GetItem write SetItem;
   end;
@@ -566,6 +574,12 @@ type
     function UpdateLightState(const AID: Integer; const AData: string) : Boolean; overload;
     /// <summary>Updates a v2 light identified by UUID using a native v2 JSON payload.</summary>
     function UpdateLightState(const AResourceID, AData: string): Boolean; overload;
+    /// <summary>Switches a light through the selected API using the supplied model identity.</summary>
+    function SetLightOn(const ALight: THueLight; const AOn: Boolean): Boolean;
+    /// <summary>Sets 1..254 legacy brightness and converts it to v2 percentage when required.</summary>
+    function SetLightBrightness(const ALight: THueLight; const ABrightness: Integer): Boolean;
+    /// <summary>Sets a light color temperature in mirek through the selected API.</summary>
+    function SetLightColorTemperature(const ALight: THueLight; const AMirek: Integer): Boolean;
 
     // Groups
     procedure LoadGroups;
@@ -577,6 +591,8 @@ type
     function UpdateGroupAction(const AID: Integer; const AData: string) : Boolean; overload;
     /// <summary>Updates a v2 grouped_light identified by UUID using a native v2 JSON payload.</summary>
     function UpdateGroupAction(const AResourceID, AData: string): Boolean; overload;
+    /// <summary>Switches a group through the selected API using its numeric or grouped_light identity.</summary>
+    function SetGroupOn(const AGroup: THueGroup; const AOn: Boolean): Boolean;
 
     // Schedules
     procedure LoadSchedules;
@@ -593,6 +609,8 @@ type
     function RecallScene(const AGroup: Integer; const AScene: string) : Boolean; overload;
     /// <summary>Recalls a v2 scene by UUID; the group argument is implicit in the v2 scene resource.</summary>
     function RecallScene(const ASceneResourceID: string): Boolean; overload;
+    /// <summary>Recalls a scene through the selected API using the supplied model identity.</summary>
+    function RecallScene(const AScene: THueScene): Boolean; overload;
 
     /// <summary>Replaces the HTTP boundary, primarily for deterministic tests.</summary>
     procedure SetTransport(const ATransport: IHueTransport);
@@ -1292,6 +1310,16 @@ begin
   end;
 end;
 
+function THueLights.GetLightByResourceID(const AResourceID: string): THueLight;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to Count - 1 do
+    if SameText(Items[I].ResourceID, AResourceID) then
+      Exit(Items[I]);
+end;
+
 procedure THueGroup.LoadGroupV2(const AResourceID, AGroupedLightResourceID,
   AName: string; const AType: THueGroupType; const AAnyOn, AAllOn: Boolean);
 begin
@@ -1694,6 +1722,27 @@ begin
   end;
 end;
 
+function THueGroups.GetGroupByResourceID(const AResourceID: string): THueGroup;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to Count - 1 do
+    if SameText(Items[I].ResourceID, AResourceID) then
+      Exit(Items[I]);
+end;
+
+function THueGroups.GetGroupByGroupedLightResourceID(
+  const AResourceID: string): THueGroup;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to Count - 1 do
+    if SameText(Items[I].GroupedLightResourceID, AResourceID) then
+      Exit(Items[I]);
+end;
+
 procedure THueScene.LoadSceneV2(const AResourceID, AName,
   AGroupResourceID: string);
 begin
@@ -2036,6 +2085,17 @@ begin
   FUseragent := AUseragent;
   if Assigned(FTransport) then
     FTransport.SetUserAgent(AUseragent);
+end;
+
+function THueScenes.GetSceneByResourceID(
+  const AResourceID: string): THueScene;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to Count - 1 do
+    if SameText(Items[I].ResourceID, AResourceID) then
+      Exit(Items[I]);
 end;
 
 procedure THueBridgeConfiguration.LoadV2(const AResourceID, ABridgeID,
@@ -2491,6 +2551,89 @@ begin
   Result := True;
 end;
 
+function THueBridge.SetLightOn(const ALight: THueLight;
+  const AOn: Boolean): Boolean;
+const
+  V1Payload: array[Boolean] of string = ('{"on":false}', '{"on":true}');
+  V2Payload: array[Boolean] of string = ('{"on":{"on":false}}',
+    '{"on":{"on":true}}');
+begin
+  if not Assigned(ALight) then
+    raise EArgumentNilException.Create('ALight');
+  if FAPIVersion = hav1 then
+  begin
+    if ALight.HueIndex <= 0 then
+      raise EHueError.Create('The light has no Hue API v1 numeric ID');
+    Result := UpdateLightState(ALight.HueIndex, V1Payload[AOn])
+  end
+  else
+  begin
+    if ALight.ResourceID = '' then
+      raise EHueError.Create('The light has no Hue API v2 ResourceID');
+    Result := UpdateLightState(ALight.ResourceID, V2Payload[AOn]);
+  end;
+end;
+
+function THueBridge.SetLightBrightness(const ALight: THueLight;
+  const ABrightness: Integer): Boolean;
+var
+  Payload: System.JSON.TJSONObject;
+  Dimming: System.JSON.TJSONObject;
+begin
+  if not Assigned(ALight) then
+    raise EArgumentNilException.Create('ALight');
+  if (ABrightness < 1) or (ABrightness > 254) then
+    raise EArgumentOutOfRangeException.Create('ABrightness must be between 1 and 254');
+  if FAPIVersion = hav1 then
+  begin
+    if ALight.HueIndex <= 0 then
+      raise EHueError.Create('The light has no Hue API v1 numeric ID');
+    Exit(UpdateLightState(ALight.HueIndex,
+      Format('{"bri":%d}', [ABrightness])));
+  end;
+  if ALight.ResourceID = '' then
+    raise EHueError.Create('The light has no Hue API v2 ResourceID');
+  Payload := System.JSON.TJSONObject.Create;
+  try
+    Dimming := System.JSON.TJSONObject.Create;
+    Dimming.AddPair('brightness', System.JSON.TJSONNumber.Create(
+      Hue.API.V2.THueAPIV2.BrightnessToV2(ABrightness)));
+    Payload.AddPair('dimming', Dimming);
+    Result := UpdateLightState(ALight.ResourceID, Payload.ToJSON);
+  finally
+    Payload.Free;
+  end;
+end;
+
+function THueBridge.SetLightColorTemperature(const ALight: THueLight;
+  const AMirek: Integer): Boolean;
+var
+  Payload: System.JSON.TJSONObject;
+  ColorTemperature: System.JSON.TJSONObject;
+begin
+  if not Assigned(ALight) then
+    raise EArgumentNilException.Create('ALight');
+  if AMirek <= 0 then
+    raise EArgumentOutOfRangeException.Create('AMirek must be greater than zero');
+  if FAPIVersion = hav1 then
+  begin
+    if ALight.HueIndex <= 0 then
+      raise EHueError.Create('The light has no Hue API v1 numeric ID');
+    Exit(UpdateLightState(ALight.HueIndex, Format('{"ct":%d}', [AMirek])));
+  end;
+  if ALight.ResourceID = '' then
+    raise EHueError.Create('The light has no Hue API v2 ResourceID');
+  Payload := System.JSON.TJSONObject.Create;
+  try
+    ColorTemperature := System.JSON.TJSONObject.Create;
+    ColorTemperature.AddPair('mirek', System.JSON.TJSONNumber.Create(AMirek));
+    Payload.AddPair('color_temperature', ColorTemperature);
+    Result := UpdateLightState(ALight.ResourceID, Payload.ToJSON);
+  finally
+    Payload.Free;
+  end;
+end;
+
 // Groups ----------------------------------------------------------------------
 procedure THueBridge.LoadGroups;
 var
@@ -2726,6 +2869,29 @@ begin
   RebuildAPI;
   FLastResponse := FAPI.Request(hhmPut, '/grouped_light/' + AResourceID, AData);
   Result := True;
+end;
+
+function THueBridge.SetGroupOn(const AGroup: THueGroup;
+  const AOn: Boolean): Boolean;
+const
+  V1Payload: array[Boolean] of string = ('{"on":false}', '{"on":true}');
+  V2Payload: array[Boolean] of string = ('{"on":{"on":false}}',
+    '{"on":{"on":true}}');
+begin
+  if not Assigned(AGroup) then
+    raise EArgumentNilException.Create('AGroup');
+  if FAPIVersion = hav1 then
+  begin
+    if AGroup.HueIndex < 0 then
+      raise EHueError.Create('The group has no Hue API v1 numeric ID');
+    Result := UpdateGroupAction(AGroup.HueIndex, V1Payload[AOn])
+  end
+  else
+  begin
+    if AGroup.GroupedLightResourceID = '' then
+      raise EHueError.Create('The group has no Hue API v2 grouped_light ResourceID');
+    Result := UpdateGroupAction(AGroup.GroupedLightResourceID, V2Payload[AOn]);
+  end;
 end;
 
 // Schedules -------------------------------------------------------------------
@@ -2977,6 +3143,20 @@ begin
   FLastResponse := FAPI.Request(hhmPut, '/scene/' + ASceneResourceID,
     '{"recall":{"action":"active"}}');
   Result := True;
+end;
+
+function THueBridge.RecallScene(const AScene: THueScene): Boolean;
+begin
+  if not Assigned(AScene) then
+    raise EArgumentNilException.Create('AScene');
+  if FAPIVersion = hav1 then
+    Result := RecallScene(AScene.Group, AScene.HueIndex)
+  else
+  begin
+    if AScene.ResourceID = '' then
+      raise EHueError.Create('The scene has no Hue API v2 ResourceID');
+    Result := RecallScene(AScene.ResourceID);
+  end;
 end;
 
 // Register THueBridge

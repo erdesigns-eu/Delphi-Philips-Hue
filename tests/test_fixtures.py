@@ -53,3 +53,20 @@ def test_reviewed_ownership_and_parser_regressions():
     assert "FNetwork.Free" in bridge
     assert "Items['effect'].AsString = 'colorloop'" in bridge
     assert "if Result <> '' then" in api
+
+
+def test_version_neutral_helpers_and_example():
+    root = Path(__file__).parents[1]
+    bridge = (root / "Hue.Bridge.pas").read_text(encoding="utf-8-sig")
+    example = (root / "examples" / "VersionNeutralControl.dpr").read_text()
+    for declaration, usage in (
+        ("SetLightOn", "SetLightOn"),
+        ("SetLightBrightness", "SetLightBrightness"),
+        ("SetLightColorTemperature", "SetLightColorTemperature"),
+        ("SetGroupOn", "SetGroupOn"),
+        ("RecallScene(const AScene: THueScene)", "RecallScene"),
+        ("GetLightByResourceID", "GetLightByResourceID"),
+        ("GetGroupByGroupedLightResourceID", None),
+    ):
+        assert declaration in bridge
+        assert usage is None or usage in example

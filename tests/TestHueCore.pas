@@ -13,6 +13,10 @@ type
     LastURL: string;
     /// <summary>Stores whether v2 authentication was supplied.</summary>
     HasApplicationKey: Boolean;
+    /// <summary>Stores the last request body passed by an adapter.</summary>
+    LastBody: string;
+    /// <summary>Stores the last HTTP method passed by an adapter.</summary>
+    LastMethod: THueHTTPMethod;
     /// <summary>Captures a request and returns an empty successful Hue envelope.</summary>
     function Execute(const AMethod: THueHTTPMethod; const AURL, ABody: string;
       const AHeaders: THueHeaders): string;
@@ -40,17 +44,22 @@ type
     [Test] procedure UnsupportedV2Operation;
     /// <summary>Verifies UUID identifiers remain strings.</summary>
     [Test] procedure ResourceIdentifiers;
+    /// <summary>Verifies version-neutral controls generate native v2 requests.</summary>
+    [Test] procedure VersionNeutralV2Control;
   end;
 
 implementation
 
 uses
-  System.SysUtils, Hue.API, Hue.API.V1, Hue.API.V2, Hue.JSON, Hue.Errors;
+  System.SysUtils, Hue.API, Hue.API.V1, Hue.API.V2, Hue.Bridge, Hue.JSON,
+  Hue.Errors;
 
 function THueMockTransport.Execute(const AMethod: THueHTTPMethod;
   const AURL, ABody: string; const AHeaders: THueHeaders): string;
 begin
   LastURL := AURL;
+  LastBody := ABody;
+  LastMethod := AMethod;
   HasApplicationKey := AHeaders.ContainsKey('hue-application-key');
   Result := '{"errors":[],"data":[]}';
 end;
@@ -127,6 +136,37 @@ begin
   R := THueResourceReference.Create(0, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
   Assert.AreEqual(0, R.LegacyID);
   Assert.AreEqual('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', R.ResourceID);
+end;
+
+procedure THueCoreTests.VersionNeutralV2Control;
+var
+  Bridge: THueBridge;
+  Light: THueLight;
+  Mock: THueMockTransport;
+begin
+  Bridge := THueBridge.Create(nil);
+  try
+    Mock := THueMockTransport.Create;
+    Bridge.SetTransport(Mock);
+    Bridge.IP := 'bridge.local';
+    Bridge.Username := 'key';
+    Bridge.APIVersion := hav2;
+    Light := Bridge.Lights.Add;
+    Light.LoadLightV2('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'Desk',
+      'LCT001', 'Hue lamp', True, 127, 250);
+
+    Assert.IsTrue(Bridge.SetLightOn(Light, False));
+    Assert.AreEqual(hhmPut, Mock.LastMethod);
+    Assert.AreEqual('https://bridge.local/clip/v2/resource/light/' +
+      Light.ResourceID, Mock.LastURL);
+    Assert.AreEqual('{"on":{"on":false}}', Mock.LastBody);
+
+    Assert.IsTrue(Bridge.SetLightBrightness(Light, 127));
+    Assert.Contains(Mock.LastBody, '"dimming"');
+    Assert.Contains(Mock.LastBody, '"brightness"');
+  finally
+    Bridge.Free;
+  end;
 end;
 
 initialization
